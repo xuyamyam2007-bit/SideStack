@@ -24,9 +24,47 @@ namespace SideStack
         public const string Name = "SideStack";
         private static string FullPath { get { return Folder + Name; } }
 
-        /// <summary>任务 XML 里的优先级：4 = 高于正常，5 = 正常（Windows 的 0~10 优先级刻度）</summary>
-        public const int PriorityHigh = 4;
-        public const int PriorityNormal = 5;
+        /// <summary>
+        /// 任务 XML 里的优先级刻度（0~10）。它**只当作"用户是否要提升启动优先级"的意图记录**，
+        /// 不要指望它能改变进程优先级：实测本机 Priority=4/5/6 起出来的进程都是
+        /// Normal(8)，7 反而是 BelowNormal(6)。真正的提升由程序启动时自己做（见 BoostProcess）。
+        /// </summary>
+        public const int PriorityBoostOn = 5;    // 意图：要提升
+        public const int PriorityBoostOff = 4;   // 意图：不提升
+
+        /// <summary>
+        /// 把当前进程的优先级提到"高于正常"。这是真正生效的那一步：
+        /// 计划任务的 Priority 字段在本机实测无效，所以在程序里自己调一次。
+        /// </summary>
+        public static bool BoostProcess()
+        {
+            try
+            {
+                System.Diagnostics.Process p = System.Diagnostics.Process.GetCurrentProcess();
+                if (p.PriorityClass == System.Diagnostics.ProcessPriorityClass.AboveNormal
+                    || p.PriorityClass == System.Diagnostics.ProcessPriorityClass.High)
+                {
+                    return true;
+                }
+                p.PriorityClass = System.Diagnostics.ProcessPriorityClass.AboveNormal;
+                Logger.Write("进程优先级 -> " + p.PriorityClass + "（BasePriority " + p.BasePriority + "）");
+                return true;
+            }
+            catch (Exception ex) { Logger.Write("StartupTask.BoostProcess", ex); return false; }
+        }
+
+        /// <summary>当前进程的实际优先级（用来回填开关，避免显示与实际不符）</summary>
+        public static bool IsProcessBoosted()
+        {
+            try
+            {
+                System.Diagnostics.ProcessPriorityClass c = System.Diagnostics.Process.GetCurrentProcess().PriorityClass;
+                return c == System.Diagnostics.ProcessPriorityClass.AboveNormal
+                    || c == System.Diagnostics.ProcessPriorityClass.High
+                    || c == System.Diagnostics.ProcessPriorityClass.RealTime;
+            }
+            catch { return false; }
+        }
 
         /// <summary>任务是否存在（= 已由计划任务接管登录自启）</summary>
         public static bool Exists()
@@ -56,21 +94,25 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("StartupTask.GetPriority", ex); return 0; }
         }
 
-        /// <summary>优先级是否处于"高于正常"</summary>
-        public static bool IsPriorityRaised()
+        /// <summary>
+        /// 用户是否开启了"启动优先级"：看任务里记的意图值，也看当前进程是否真的已经提升过
+        /// （这样用户刚切换开关、还没重启程序时，界面也不会显示成相反的旧状态）。
+        /// </summary>
+        public static bool IsPriorityBoostWanted()
         {
             int p = GetPriority();
-            return p > 0 && p <= PriorityHigh;
+            if (p >= PriorityBoostOn) { return true; }
+            return IsProcessBoosted();
         }
 
-        /// <summary>把任务的优先级设为 高于正常(true) / 正常(false)</summary>
-        public static bool SetPriorityRaised(bool raised)
+        /// <summary>把任务里的"意图值"设成 要提升(true) / 不提升(false)</summary>
+        public static bool SetPriorityBoostIntent(bool on)
         {
             try
             {
                 string xml;
                 if (!Export(out xml)) { return false; }
-                int want = raised ? PriorityHigh : PriorityNormal;
+                int want = on ? PriorityBoostOn : PriorityBoostOff;
                 string patched;
                 if (Regex.IsMatch(xml, @"<Priority>\d+</Priority>"))
                 {
@@ -95,11 +137,11 @@ namespace SideStack
                 string output = Run("schtasks.exe", new string[] { "/Create", "/TN", FullPath, "/XML", tmp, "/F" }, out code, 30000);
                 try { File.Delete(tmp); } catch { }
 
-                Logger.Write("启动优先级 -> " + (raised ? "高于正常" : "正常") + "（schtasks 退出码 " + code + "）"
+                Logger.Write("启动优先级意图 -> " + (on ? "要提升" : "不提升") + "（schtasks 退出码 " + code + "）"
                              + (code == 0 ? "" : "：" + output));
                 return code == 0;
             }
-            catch (Exception ex) { Logger.Write("StartupTask.SetPriorityRaised", ex); return false; }
+            catch (Exception ex) { Logger.Write("StartupTask.SetPriorityBoostIntent", ex); return false; }
         }
 
         /// <summary>
@@ -147,7 +189,7 @@ namespace SideStack
                 if (string.IsNullOrEmpty(exePath)) { return false; }
                 string user = Environment.UserName;
                 string workDir = Path.GetDirectoryName(exePath);
-                int prio = raised ? PriorityHigh : PriorityNormal;
+                int prio = raised ? PriorityBoostOn : PriorityBoostOff;
 
                 string xml = Template
                     .Replace("@USER@", Escape(user))

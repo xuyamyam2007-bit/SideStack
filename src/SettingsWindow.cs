@@ -361,9 +361,9 @@ namespace SideStack
 
             cbStartupPriority = MakeToggle(delegate { ApplyStartupPriority(); });
             sp.Children.Add(CheckRow(cbStartupPriority, "启动优先级",
-                "开启后用「任务计划程序」在登录时启动，并把进程优先级设为「高于正常」" +
-                "（HKCU 的 Run 项没有优先级可设，也起得偏晚）；关掉只把优先级恢复为「正常」。" +
-                "若当前还没由计划任务接管，开启它会顺便把自启迁移过来。"));
+                "开启后用「任务计划程序」在登录时启动，并把进程优先级设为「高于正常」（5）；" +
+                "关掉只把优先级恢复为「正常」（4）。若自启还没由计划任务接管，开启它会顺便迁移过来。" +
+                "实测本机：SideStack 比 explorer 早约 0.2 秒启动，TranslucentTB 晚约 7.5 秒。"));
 
             cbDrag = MakeToggle(delegate
             {
@@ -427,6 +427,7 @@ namespace SideStack
                     if (cbPinned != null) { cbPinned.SetCheckedSilently((getPinned != null) && getPinned()); }
                     if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
                     if (cbHideIcons != null) { cbHideIcons.SetCheckedSilently(cfg.HideDesktopIcons); }
+                    if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
 
                     for (int i = 0; i < refreshers.Count; i++)
                     {
@@ -852,50 +853,51 @@ namespace SideStack
                 }
                 if (cbStartupPriority != null)
                 {
-                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
+                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted());
                 }
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyAutoStart", ex); }
         }
 
         /// <summary>
-        /// 「启动优先级」开关：把计划任务版自启的进程优先级设为「高于正常」/「正常」。
+        /// 「启动优先级」开关。
         ///
-        /// 前提是登录自启已由计划任务接管（见 StartupTask.cs）。如果当前还挂在 Run 项上，
-        /// 就顺手切换成计划任务版：删掉 Run 项 + 建任务 + 套用所选优先级，避免两条通道并存。
-        /// 这样这个开关单独也能用，且不会造成"启动两份"。
+        /// 背景（本机实测）：计划任务 XML 里的 &lt;Priority&gt; 并不可靠 —— Priority=4/5/6
+        /// 起出来的进程都是 Normal(8)，7 反而变成 BelowNormal(6)。所以真正提升优先级这件事
+        /// 由程序启动时自己做（StartupTask.BoostProcess），任务里的值只作为"用户要不要"的意图记录。
+        /// 切换开关时立即作用到当前进程，不用等下次登录。
+        /// 若登录自启还挂在 Run 项上，会顺便迁移成计划任务版（避免两条通道并存）。
         /// </summary>
         private void ApplyStartupPriority()
         {
             try
             {
-                bool raised = cbStartupPriority != null && cbStartupPriority.IsChecked == true;
-                Logger.Write("启动优先级：用户切换到 " + (raised ? "高于正常" : "正常"));
+                bool want = cbStartupPriority != null && cbStartupPriority.IsChecked == true;
+                Logger.Write("启动优先级：用户切换到 " + (want ? "要提升" : "不提升"));
 
                 if (!StartupTask.Exists())
                 {
-                    // 尚未由计划任务接管：把 Run 项换成计划任务
                     Logger.Write("启动优先级：当前为 Run 项自启，切换为计划任务版");
-                    if (!StartupTask.Create(raised, exePath))
+                    if (!StartupTask.Create(want, exePath))
                     {
                         Logger.Write("启动优先级：创建计划任务失败，保持原自启方式不变");
-                        if (cbStartupPriority != null)
-                        {
-                            cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
-                        }
+                        if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
                         return;
                     }
-                    ShellUtils.SetAutoStart(false, exePath);   // 删掉 Run 项，避免启动两份
+                    ShellUtils.SetAutoStart(false, exePath);
                     Change(delegate { cfg.AutoStart = true; });
                 }
                 else
                 {
-                    StartupTask.SetPriorityRaised(raised);
+                    StartupTask.SetPriorityBoostIntent(want);
                 }
+
+                // 立即作用到当前进程（关掉时是"下次启动不再提升"，本次运行不强行降回去）
+                if (want) { StartupTask.BoostProcess(); }
 
                 if (cbStartupPriority != null)
                 {
-                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
+                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted());
                 }
                 if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
             }

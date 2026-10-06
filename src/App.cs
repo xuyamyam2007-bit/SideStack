@@ -136,6 +136,11 @@ namespace SideStack
             Logger.Write("exe = " + exePath);
 
             ShellUtils.MigrateLegacyAutoStart(exePath);
+
+            // 「启动优先级」：计划任务里记的是"用户要不要"，真正把进程优先级提上去由这里做 ——
+            // 实测任务 XML 的 <Priority> 并不能可靠改变进程优先级（4/5/6 都是 Normal，7 反而更低）。
+            if (StartupTask.IsPriorityBoostWanted()) { StartupTask.BoostProcess(); }
+
             ConfigStore.FilePath = Path.Combine(dir, "config.txt");
 
             bool exists = File.Exists(ConfigStore.FilePath);
