@@ -34,7 +34,7 @@ namespace SideStack
             try
             {
                 int code;
-                Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath }, out code);
+                Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath }, out code, 8000);
                 return code == 0;
             }
             catch { return false; }
@@ -92,7 +92,7 @@ namespace SideStack
                 File.WriteAllText(tmp, patched, new UnicodeEncoding(false, true));
 
                 int code;
-                string output = Run("schtasks.exe", new string[] { "/Create", "/TN", FullPath, "/XML", tmp, "/F" }, out code);
+                string output = Run("schtasks.exe", new string[] { "/Create", "/TN", FullPath, "/XML", tmp, "/F" }, out code, 30000);
                 try { File.Delete(tmp); } catch { }
 
                 Logger.Write("启动优先级 -> " + (raised ? "高于正常" : "正常") + "（schtasks 退出码 " + code + "）"
@@ -102,17 +102,37 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("StartupTask.SetPriorityRaised", ex); return false; }
         }
 
-        /// <summary>删除任务（回退到 Run 项自启时用；调用方需自行保证 Run 项已写好）</summary>
-        public static bool Delete()
+        /// <summary>
+        /// 供 /TR 使用的"命令"文本：exe 全路径（含空格时加引号）。
+        /// 用固定模板建任务时也能带上它来固定 exe 路径。
+        /// </summary>
+        public static string CommandFor(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath)) { return ""; }
+            return (exePath.IndexOf(' ') >= 0) ? ("\"" + exePath + "\"") : exePath;
+        }
+
+        /// <summary>
+        /// 删除任务。传入 exePath 时会先用固定模板把任务覆盖成"指向该 exe"的形式，
+        /// 避免任务里记着旧路径；随后删除。删除失败（例如被安全软件拦住）返回 false。
+        /// </summary>
+        public static bool Delete(string exePath)
         {
             try
             {
+                if (!string.IsNullOrEmpty(exePath)) { Create(false, exePath); }
                 int code;
-                string output = Run("schtasks.exe", new string[] { "/Delete", "/TN", FullPath, "/F" }, out code);
+                string output = Run("schtasks.exe", new string[] { "/Delete", "/TN", FullPath, "/F" }, out code, 30000);
                 Logger.Write("删除计划任务 -> 退出码 " + code + (code == 0 ? "" : "：" + output));
                 return code == 0;
             }
             catch (Exception ex) { Logger.Write("StartupTask.Delete", ex); return false; }
+        }
+
+        /// <summary>删除任务（不指定 exe）</summary>
+        public static bool Delete()
+        {
+            return Delete(null);
         }
 
         /// <summary>
@@ -139,7 +159,7 @@ namespace SideStack
                 File.WriteAllText(tmp, xml, new UnicodeEncoding(false, true));
 
                 int code;
-                string output = Run("schtasks.exe", new string[] { "/Create", "/TN", FullPath, "/XML", tmp, "/F" }, out code);
+                string output = Run("schtasks.exe", new string[] { "/Create", "/TN", FullPath, "/XML", tmp, "/F" }, out code, 30000);
                 try { File.Delete(tmp); } catch { }
 
                 Logger.Write("创建计划任务（优先级 " + prio + "）-> 退出码 " + code
@@ -214,7 +234,7 @@ namespace SideStack
         {
             xml = null;
             int code;
-            string output = Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath, "/XML" }, out code);
+            string output = Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath, "/XML" }, out code, 8000);
             if (code != 0) { return false; }          // 任务不存在（或没有权限）
             if (string.IsNullOrEmpty(output)) { return false; }
             xml = output;
@@ -222,7 +242,7 @@ namespace SideStack
         }
 
         /// <summary>跑一个控制台程序并取回输出（不弹窗口、不经过 shell）</summary>
-        private static string Run(string exe, string[] args, out int exitCode)
+        private static string Run(string exe, string[] args, out int exitCode, int timeoutMs)
         {
             ProcessStartInfo psi = new ProcessStartInfo(exe);
             psi.UseShellExecute = false;
@@ -236,7 +256,7 @@ namespace SideStack
             {
                 string so = p.StandardOutput.ReadToEnd();
                 string se = p.StandardError.ReadToEnd();
-                if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } exitCode = -1; return so + se; }
+                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } exitCode = -1; return so + se; }
                 exitCode = p.ExitCode;
                 sb.Append(so);
                 if (!string.IsNullOrEmpty(se)) { sb.Append(se); }

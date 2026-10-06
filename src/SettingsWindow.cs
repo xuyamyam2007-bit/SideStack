@@ -361,8 +361,9 @@ namespace SideStack
 
             cbStartupPriority = MakeToggle(delegate { ApplyStartupPriority(); });
             sp.Children.Add(CheckRow(cbStartupPriority, "启动优先级",
-                "开启后改用「任务计划程序」在登录时启动，并把进程优先级设为「高于正常」" +
-                "（HKCU 的 Run 项没有优先级可设，也起得偏晚）。关掉即恢复普通优先级。"));
+                "开启后用「任务计划程序」在登录时启动，并把进程优先级设为「高于正常」" +
+                "（HKCU 的 Run 项没有优先级可设，也起得偏晚）；关掉只把优先级恢复为「正常」。" +
+                "若当前还没由计划任务接管，开启它会顺便把自启迁移过来。"));
 
             cbDrag = MakeToggle(delegate
             {
@@ -424,7 +425,7 @@ namespace SideStack
                 {
                     if (cbDrag != null) { cbDrag.SetCheckedSilently(cfg.DragReorder); }
                     if (cbPinned != null) { cbPinned.SetCheckedSilently((getPinned != null) && getPinned()); }
-                    if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
+                    if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
                     if (cbHideIcons != null) { cbHideIcons.SetCheckedSilently(cfg.HideDesktopIcons); }
 
                     for (int i = 0; i < refreshers.Count; i++)
@@ -787,7 +788,7 @@ namespace SideStack
             {
                 if (cfg.AnimFps > maxFps) { cfg.AnimFps = maxFps; }
 
-                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
+                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
                 if (cbDrag != null) { cbDrag.SetCheckedSilently(cfg.DragReorder); }
                 if (cbHideIcons != null) { cbHideIcons.SetCheckedSilently(cfg.HideDesktopIcons); }
                 if (cbPinned != null) { cbPinned.SetCheckedSilently((getPinned != null) && getPinned()); }
@@ -820,26 +821,39 @@ namespace SideStack
             try
             {
                 bool want = cbAutoStart != null && cbAutoStart.IsChecked == true;
-                bool on = ShellUtils.IsAutoStartOn();
+                bool taskExists = StartupTask.Exists();
+                Logger.Write("开机自启 -> " + (want ? "开" : "关") + "（计划任务存在 " + taskExists + "）");
 
-                // 计划任务版自启与 Run 项是两条通道，同时存在会让登录时启动两份。
-                // 若已由计划任务接管，勾选"开机自动启动"就什么都不做（保持单一通道）。
-                if (want && StartupTask.Exists())
+                // 登录自启有两条通道：Run 项与计划任务。两条同时存在会启动两份，所以始终只留一条：
+                //   打开 -> 已有计划任务就保持它（不再补写 Run 项）；否则写 Run 项
+                //   关闭 -> 删掉计划任务 + 删掉 Run 项（任务引用的就是当前 exe，删掉即失效）
+                if (want)
                 {
-                    if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
-                    Logger.Write("开机自启：已由计划任务接管，未再写 Run 项");
-                    return;
-                }
-
-                if (want != on)
-                {
-                    if (!ShellUtils.SetAutoStart(want, exePath))
+                    if (!taskExists)
                     {
-                        Logger.Write("开机自启写入失败（可能被安全软件拦截）");
+                        if (!ShellUtils.SetAutoStart(true, exePath))
+                        {
+                            Logger.Write("开机自启写入失败（可能被安全软件拦截）");
+                        }
                     }
                 }
+                else
+                {
+                    if (taskExists) { StartupTask.Delete(exePath); }
+                    ShellUtils.SetAutoStart(false, exePath);
+                }
+
                 Change(delegate { cfg.AutoStart = want; });
-                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
+
+                // 回填开关的真实状态：写盘失败或被拦截时，不让界面显示成"已生效"
+                if (cbAutoStart != null)
+                {
+                    cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists());
+                }
+                if (cbStartupPriority != null)
+                {
+                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
+                }
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyAutoStart", ex); }
         }
@@ -883,7 +897,7 @@ namespace SideStack
                 {
                     cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
                 }
-                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
+                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyStartupPriority", ex); }
         }
