@@ -28,10 +28,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 先确认源码本身能编译（这一步失败的信息比后面打包失败更好定位）
+      # 不用 build.cmd/build.ps1：它们在 CI 上会因为 shell 委托（build.cmd 优先用 pwsh）
+      # 触发 csc 的 CS2021（"/out:..." 被多包了一层引号）。这里直接按同一套参数调 csc，
+      # 与本地手工编译完全一致，不依赖任何 shell 委托。
       - name: 编译 exe
-        shell: cmd
-        run: build.cmd
+        shell: pwsh
+        run: |
+          $fw = Get-ChildItem 'C:\Windows\Microsoft.NET\Framework64' -Directory |
+                Where-Object { $_.Name -like 'v4*' } | Sort-Object Name -Descending | Select-Object -First 1
+          $csc = Join-Path $fw.FullName 'csc.exe'
+          $wpf = Join-Path $fw.FullName 'WPF'
+          $args = @(
+            '/nologo', '/target:winexe', '/platform:anycpu', '/optimize+',
+            "/out:$PWD\SideStack.exe",
+            "/win32icon:$PWD\app.ico",
+            "/win32manifest:$PWD\app.manifest"
+          )
+          foreach ($r in @('System.dll','System.Core.dll','System.Drawing.dll','System.Xaml.dll')) {
+            $args += "/r:" + (Join-Path $fw.FullName $r)
+          }
+          foreach ($r in @('PresentationFramework.dll','PresentationCore.dll','WindowsBase.dll')) {
+            $args += "/r:" + (Join-Path $wpf $r)
+          }
+          $args += (Get-ChildItem 'src' -Filter *.cs -File | Sort-Object Name | ForEach-Object { $_.FullName })
+          & $csc @args
+          if ($LASTEXITCODE -ne 0) { throw "csc 编译失败，退出码 $LASTEXITCODE" }
+          Get-Item .\SideStack.exe | Format-Table Name, Length
 
       - name: 解析版本号
         id: ver
