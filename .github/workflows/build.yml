@@ -1,0 +1,87 @@
+# SideStack 自动构建 / 自动发布
+#
+# 触发方式：
+#   · 推送到 main        -> 只编译验证（同时把 MSI 作为构建产物上传，方便随时下载试装）
+#   · 推送 vX.Y.Z 标签   -> 用标签版本号打包 MSI，并作为附件挂到对应的 Release
+#   · 手动触发（Actions 页面 Run workflow）-> 同 main
+#
+# 说明：编译用的是 Windows 自带的 .NET Framework 编译器（csc.exe），打包用的是 WiX Toolset v3。
+# installer\build-msi.ps1 会在缺少 WiX 时自动下载到 %LOCALAPPDATA%\SideStackBuildTools\wix314，
+# 所以这里不需要额外的“安装 WiX”步骤。
+#
+# 发布新版本的做法：
+#   git tag v1.0.1 && git push origin v1.0.1
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 先确认源码本身能编译（这一步失败的信息比后面打包失败更好定位）
+      - name: 编译 exe
+        shell: cmd
+        run: build.cmd
+
+      - name: 解析版本号
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $isTag = '${{ github.ref }}'.StartsWith('refs/tags/')
+          if ($isTag -and $tag -match '\d+\.\d+\.\d+') { $v = $Matches[0] } else { $v = '1.0.0' }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "版本号: $v"
+
+      - name: 打包 MSI
+        shell: pwsh
+        run: .\installer\build-msi.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      - name: 校验产物
+        shell: pwsh
+        run: |
+          $expected = "dist\SideStack-${{ steps.ver.outputs.version }}-x64.msi"
+          if (-not (Test-Path -LiteralPath $expected)) { throw "未生成 $expected" }
+          Get-ChildItem dist -File | Format-Table Name, Length
+
+      # 上传 Release 需要确切文件名，这里导出给后续步骤
+      - name: 记录 MSI 路径
+        id: msi
+        shell: pwsh
+        run: |
+          $p = "dist\SideStack-${{ steps.ver.outputs.version }}-x64.msi"
+          "path=$p" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStack-${{ steps.ver.outputs.version }}-msi
+          path: dist/*.msi
+          if-no-files-found: error
+
+      # 只有推标签时才发布到 Release
+      - name: 发布到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $rel = '${{ github.ref_name }}'
+          $msi = '${{ steps.msi.outputs.path }}'
+          $ver = '${{ steps.ver.outputs.version }}'
+          gh release create $rel $msi --title "SideStack $ver" --generate-notes
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "该标签的 Release 已存在，改为上传附件（覆盖同名附件）"
+            gh release upload $rel $msi --clobber
+            if ($LASTEXITCODE -ne 0) { throw "上传 MSI 到 Release 失败" }
+          }
