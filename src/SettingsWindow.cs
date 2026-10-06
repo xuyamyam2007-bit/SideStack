@@ -163,7 +163,7 @@ namespace SideStack
             Content = outer;
         }
 
-        private ToggleSwitch cbPinned, cbAutoStart, cbDrag, cbHideIcons;
+        private ToggleSwitch cbPinned, cbAutoStart, cbDrag, cbHideIcons, cbStartupPriority;
         private Grid glassHost;
 
         private const double DragBand = 40;
@@ -359,6 +359,11 @@ namespace SideStack
             cbAutoStart = MakeToggle(delegate { ApplyAutoStart(); });
             sp.Children.Add(CheckRow(cbAutoStart, "开机自动启动"));
 
+            cbStartupPriority = MakeToggle(delegate { ApplyStartupPriority(); });
+            sp.Children.Add(CheckRow(cbStartupPriority, "启动优先级",
+                "开启后改用「任务计划程序」在登录时启动，并把进程优先级设为「高于正常」" +
+                "（HKCU 的 Run 项没有优先级可设，也起得偏晚）。关掉即恢复普通优先级。"));
+
             cbDrag = MakeToggle(delegate
             {
                 Change(delegate { cfg.DragReorder = cbDrag.IsChecked == true; });
@@ -506,6 +511,12 @@ namespace SideStack
 
         private static Grid CheckRow(ToggleSwitch ts, string label)
         {
+            return CheckRow(ts, label, null);
+        }
+
+        /// <summary>开关行；hint 非空时在开关下面再加一行小字说明（缩进与标签列对齐）</summary>
+        private static Grid CheckRow(ToggleSwitch ts, string label, string hint)
+        {
             Grid g = new Grid();
             g.Margin = new Thickness(0, 4, 0, 4);
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelW) });
@@ -520,10 +531,33 @@ namespace SideStack
             h.Children.Add(t);
             h.Children.Add(ts);
 
-            Grid.SetColumn(h, 1);
-            g.Children.Add(h);
+            if (string.IsNullOrEmpty(hint))
+            {
+                Grid.SetColumn(h, 1);
+                g.Children.Add(h);
+                return g;
+            }
+
+            StackPanel col = new StackPanel();
+            col.VerticalAlignment = VerticalAlignment.Center;
+            col.Children.Add(h);
+            TextBlock tip = Theme.Hint(hint);
+            tip.Margin = new Thickness(0, 3, 0, 0);
+            col.Children.Add(tip);
+
+            Grid.SetColumn(col, 1);
+            g.Children.Add(col);
             return g;
         }
+
+        /// <summary>独立的小字说明（与开关行的提示同款样式）</summary>
+        private static TextBlock Hint(string s)
+        {
+            TextBlock t = Theme.Hint(s);
+            t.Margin = new Thickness(LabelW, 2, 0, 2);
+            return t;
+        }
+
 
         private static Grid ButtonGrid(int count, params FrameworkElement[] buttons)
         {
@@ -786,7 +820,18 @@ namespace SideStack
             try
             {
                 bool want = cbAutoStart != null && cbAutoStart.IsChecked == true;
-                if (want != ShellUtils.IsAutoStartOn())
+                bool on = ShellUtils.IsAutoStartOn();
+
+                // 计划任务版自启与 Run 项是两条通道，同时存在会让登录时启动两份。
+                // 若已由计划任务接管，勾选"开机自动启动"就什么都不做（保持单一通道）。
+                if (want && StartupTask.Exists())
+                {
+                    if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
+                    Logger.Write("开机自启：已由计划任务接管，未再写 Run 项");
+                    return;
+                }
+
+                if (want != on)
                 {
                     if (!ShellUtils.SetAutoStart(want, exePath))
                     {
@@ -797,6 +842,50 @@ namespace SideStack
                 if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyAutoStart", ex); }
+        }
+
+        /// <summary>
+        /// 「启动优先级」开关：把计划任务版自启的进程优先级设为「高于正常」/「正常」。
+        ///
+        /// 前提是登录自启已由计划任务接管（见 StartupTask.cs）。如果当前还挂在 Run 项上，
+        /// 就顺手切换成计划任务版：删掉 Run 项 + 建任务 + 套用所选优先级，避免两条通道并存。
+        /// 这样这个开关单独也能用，且不会造成"启动两份"。
+        /// </summary>
+        private void ApplyStartupPriority()
+        {
+            try
+            {
+                bool raised = cbStartupPriority != null && cbStartupPriority.IsChecked == true;
+                Logger.Write("启动优先级：用户切换到 " + (raised ? "高于正常" : "正常"));
+
+                if (!StartupTask.Exists())
+                {
+                    // 尚未由计划任务接管：把 Run 项换成计划任务
+                    Logger.Write("启动优先级：当前为 Run 项自启，切换为计划任务版");
+                    if (!StartupTask.Create(raised, exePath))
+                    {
+                        Logger.Write("启动优先级：创建计划任务失败，保持原自启方式不变");
+                        if (cbStartupPriority != null)
+                        {
+                            cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
+                        }
+                        return;
+                    }
+                    ShellUtils.SetAutoStart(false, exePath);   // 删掉 Run 项，避免启动两份
+                    Change(delegate { cfg.AutoStart = true; });
+                }
+                else
+                {
+                    StartupTask.SetPriorityRaised(raised);
+                }
+
+                if (cbStartupPriority != null)
+                {
+                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityRaised());
+                }
+                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn()); }
+            }
+            catch (Exception ex) { Logger.Write("SettingsWindow.ApplyStartupPriority", ex); }
         }
 
         private void OpenAppList()
