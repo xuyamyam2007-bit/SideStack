@@ -1,0 +1,19 @@
+# build outputs
+SideStack.exe.new
+SideStack.exe.bak
+*.bak
+*.pdb
+
+# WiX intermediate output
+installer/obj/
+
+# python cache
+__pycache__/
+*.pyc
+
+# OS / editor noise
+Thumbs.db
+desktop.ini
+.vs/
+.idea/
+*.user
