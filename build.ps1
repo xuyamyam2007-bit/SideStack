@@ -1,4 +1,4 @@
-﻿# SideStack 一键编译脚本
+# SideStack 一键编译脚本
 # 用法（在本目录下打开 PowerShell 执行）：
 #   .\build.ps1                 编译（自动备份 SideStack.exe.bak，不启动）
 #   .\build.ps1 -Restart        编译后结束旧实例并启动新版本
