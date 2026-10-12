@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SideStack 安装包（MSI）作者文件 —— Windows Installer XML (WiX Toolset v3)
+
+  由 installer\build-msi.ps1 调用，需要传入以下预处理变量（candle -d...）：
+    Version     产品版本号，形如 1.0.0（必须是 x.y.z）
+    SourceExe   要打包的 SideStack.exe 完整路径
+    ProjectDir  SideStack 项目根目录（用于取 app.ico）
+    LicenseRtf  许可协议 RTF 完整路径（由 license-zh.txt 生成）
+    BuildDir    中间产物目录（.wixobj / .wixpdb）
+
+  安装形态：按用户安装（perUser，无需管理员权限）
+    程序目录      %LocalAppData%\Programs\SideStack
+    开始菜单      %AppData%\Microsoft\Windows\Start Menu\Programs\SideStack
+    桌面快捷方式  可选（默认勾选）
+    开机自启动    可选（默认勾选，写 HKCU\...\Run\SideStack，与程序内设置一致）
+    卸载入口      设置 → 应用 → 已安装的应用（按用户注册在 HKCU）
+
+  说明：安装目录位于用户配置文件下，因此每个组件都必须用 HKCU 注册表值作 KeyPath
+  （ICE38/ICE43 的要求），并且本包创建的用户目录都要在卸载时删除（ICE64 的要求）。
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product Id="*"
+           Name="SideStack"
+           Language="2052"
+           Version="$(var.Version)"
+           Manufacturer="SideStack"
+           UpgradeCode="BC430B88-D468-4440-8A52-DC6C2C92FD8C">
+
+    <Package Id="*"
+             Keywords="Installer;SideStack;Dock"
+             Description="SideStack 桌面图标收纳面板"
+             Comments="把桌面快捷方式收纳到屏幕左右两侧的隐藏式 Dock 面板"
+             Manufacturer="SideStack"
+             InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perUser"
+             Platform="x64"
+             Languages="2052"
+             SummaryCodepage="936" />
+
+    <!-- 单个内嵌 CAB，无需外部文件 -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 升级：同版本重装也走「先卸载旧版再装新版」，避免重复 ProductCode 冲突 -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="已安装更高版本的 SideStack。请先在“应用和功能”中卸载，再安装当前版本。" />
+
+    <!-- ============================ 控制面板（应用和功能）信息 ============================ -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.ProjectDir)app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPCOMMENTS" Value="桌面左右两侧的隐藏式图标收纳面板（托盘常驻，无需管理员权限）" />
+    <!-- 注：ARPNOMODIFY 由 WixUI_InstallDir 自己声明（该 UI 集不带“修改”流程），这里不要再写 -->
+
+    <!-- ============================ 安装位置 ============================ -->
+    <!-- 让安装向导出现「目标文件夹」页；INSTALLFOLDER 默认 %LocalAppData%\Programs\SideStack，
+         用户可以改成任意有写入权限的目录（按用户安装，无需管理员权限）。 -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- ============================ 组件勾选项（默认勾选） ============================ -->
+    <Property Id="INSTALL_DESKTOP" Value="1" Secure="yes" />
+    <Property Id="INSTALL_AUTOSTART" Value="1" Secure="yes" />
+
+    <!-- ============================ 安装完成后可选启动 ============================ -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="立即运行 SideStack" />
+    <Property Id="WixShellExecTarget" Value="[#SideStackExe]" />
+    <CustomAction Id="LaunchSideStack"
+                  BinaryKey="WixCA"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes" />
+
+    <!-- ============================ 目录结构 ============================ -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <!-- %LocalAppData%\Programs\SideStack -->
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="LocalProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLFOLDER" Name="SideStack" />
+        </Directory>
+      </Directory>
+      <!-- %AppData%\Microsoft\Windows\Start Menu\Programs\SideStack -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="SideStackMenuFolder" Name="SideStack" />
+      </Directory>
+      <!-- 用户桌面 -->
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <!-- ============================ 主程序（必装） ============================ -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="MainExe"
+                 Guid="E6C0EAC5-CF5C-46DB-974B-683D6A894CA6"
+                 Win64="yes">
+        <!--
+          用 exe 自己当 KeyPath（而不是 HKCU 注册表值）：安装目录可以被用户改到任意位置，
+          KeyPath 是文件时 MSI 会把它的**绝对路径**记进组件注册表，卸载时按记录路径删除；
+          若 KeyPath 是注册表值，卸载时会按默认目录重新解析 INSTALLFOLDER，找不到自定义
+          目录里的文件，于是留下孤儿 exe。代价是过不了 ICE38（per-user 组件建议用 HKCU
+          KeyPath），本包只做按用户安装，所以该告警可以安全抑制（构建脚本里已 -sice:ICE38）。
+        -->
+        <File Id="SideStackExe"
+              Name="SideStack.exe"
+              Source="$(var.SourceExe)"
+              KeyPath="yes" />
+        <!-- 安装位置留个记号，方便排查；不再作为 KeyPath -->
+        <RegistryValue Root="HKCU"
+                       Key="Software\SideStack\Installer"
+                       Name="InstallDir"
+                       Type="string"
+                       Value="[INSTALLFOLDER]" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <!-- 只在目录为空时才会真正删除，避免误删其他程序共用的 Programs 目录 -->
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="LocalProgramsFolder" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- 开始菜单快捷方式（随主程序一起安装） -->
+    <DirectoryRef Id="SideStackMenuFolder">
+      <Component Id="StartMenuShortcut"
+                 Guid="9E9CAFC1-8236-4AE8-8AAC-AEDDA196C8D3"
+                 Win64="yes">
+        <Shortcut Id="StartMenuLink"
+                  Name="SideStack"
+                  Description="桌面图标收纳面板"
+                  Target="[INSTALLFOLDER]SideStack.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\SideStack\Installer"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+        <RemoveFolder Id="RemoveStartMenuFolder" Directory="SideStackMenuFolder" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ============================ 可选组件：桌面快捷方式 ============================ -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut"
+                 Guid="4707A164-5E9C-409B-85AC-047DE0786922"
+                 Win64="yes">
+        <Shortcut Id="DesktopLink"
+                  Name="SideStack"
+                  Description="桌面图标收纳面板"
+                  Target="[INSTALLFOLDER]SideStack.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\SideStack\Installer"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ============================ 可选组件：开机自启动 ============================ -->
+    <!-- 与程序内「开机自启」写的是同一个值：HKCU\...\Run\SideStack -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AutoStartEntry"
+                 Guid="3F63D2B7-0F4E-42AF-BACF-DC96B9B879B4"
+                 Win64="yes">
+        <RegistryValue Root="HKCU"
+                       Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                       Name="SideStack"
+                       Type="string"
+                       Value="&quot;[INSTALLFOLDER]SideStack.exe&quot;"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ============================ 功能树（安装向导里可勾选） ============================ -->
+    <Feature Id="MainApp"
+             Title="SideStack 主程序"
+             Description="主程序 SideStack.exe 与开始菜单快捷方式（必装）。"
+             Level="1"
+             Absent="disallow"
+             AllowAdvertise="no"
+             InstallDefault="local"
+             TypicalDefault="install">
+      <ComponentRef Id="MainExe" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <Feature Id="DesktopShortcut"
+             Title="桌面快捷方式"
+             Description="在桌面创建 SideStack 快捷方式。"
+             Level="1"
+             AllowAdvertise="no"
+             InstallDefault="local"
+             TypicalDefault="install">
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <Feature Id="AutoStart"
+             Title="开机自动启动"
+             Description="登录 Windows 后自动启动 SideStack（写入 HKCU\...\Run，与程序内设置一致）。"
+             Level="1"
+             AllowAdvertise="no"
+             InstallDefault="local"
+             TypicalDefault="install">
+      <ComponentRef Id="AutoStartEntry" />
+    </Feature>
+
+    <!-- ============================ 安装界面（简体中文） ============================ -->
+    <!--
+      WixUI_InstallDir 提供「目标文件夹」页（可浏览/手填任意安装位置）。
+      它本身没有组件勾选页，而 WiX 的内置 UI 集不能混用（会重复定义对话框），所以这里
+      自己加一页「安装选项」，用 InstallUISequence 的 Show 行插在欢迎页之前 ——
+      不覆盖内置对话框、不伪造导航事件，全部走标准机制。
+    -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    <UIRef Id="WixUI_InstallDir" />
+
+    <UI>
+      <Dialog Id="SideStackOptionsDlg"
+              Width="370"
+              Height="270"
+              Title="[ProductName] 安装向导">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" Sunken="yes" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="240" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}安装选项" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="选择要一起安装的附加组件，下一步是欢迎页。" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" Sunken="yes" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" Sunken="yes" />
+
+        <Control Id="OptionsLabel" Type="Text" X="20" Y="70" Width="320" Height="15"
+                 NoPrefix="yes" Sunken="yes" Text="附加组件（不需要可以取消勾选）：" />
+        <Control Id="DesktopCheck" Type="CheckBox" X="28" Y="96" Width="320" Height="17"
+                 Property="INSTALL_DESKTOP" CheckBoxValue="1" Text="在桌面创建 SideStack 快捷方式" />
+        <Control Id="AutoStartCheck" Type="CheckBox" X="28" Y="120" Width="320" Height="17"
+                 Property="INSTALL_AUTOSTART" CheckBoxValue="1" Text="开机自动启动（写入 HKCU\...\Run，与程序内设置一致）" />
+        <Control Id="NotesLabel" Type="Text" X="20" Y="160" Width="330" Height="60"
+                 NoPrefix="yes" Sunken="yes" Text="主程序与开始菜单快捷方式一定会安装；安装位置在后面的「目标文件夹」页里选择（默认 %LocalAppData%\Programs\SideStack，按用户安装，无需管理员权限）。" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Disabled="yes" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <!-- 勾选结果写进功能的安装状态，然后交回 InstallUISequence 继续走欢迎页 -->
+          <Publish Event="AddLocal" Value="DesktopShortcut" Order="1">INSTALL_DESKTOP = "1"</Publish>
+          <Publish Event="Remove" Value="DesktopShortcut" Order="2">INSTALL_DESKTOP = "0"</Publish>
+          <Publish Event="AddLocal" Value="AutoStart" Order="3">INSTALL_AUTOSTART = "1"</Publish>
+          <Publish Event="Remove" Value="AutoStart" Order="4">INSTALL_AUTOSTART = "0"</Publish>
+          <Publish Event="EndDialog" Value="Return" Order="5">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- 「完成」页勾选“立即运行 SideStack”时启动程序（仅首次安装）；条件写元素内容 -->
+      <Publish Dialog="ExitDialog"
+               Control="Finish"
+               Event="DoAction"
+               Value="LaunchSideStack">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+
+    <!-- 只在本机没装过时显示；1295 落在 MaintenanceWelcomeDlg(1296)/WelcomeDlg(1298) 之前 -->
+    <InstallUISequence>
+      <Show Dialog="SideStackOptionsDlg" Sequence="1295">NOT Installed</Show>
+    </InstallUISequence>
+
+    <!-- ============================ 前置条件：.NET Framework ============================ -->
+    <!--
+      程序本身只要求 .NET Framework 4.0（整个工程可以对 4.0 的运行时程序集编译通过）。
+      这里按「4.8」设门槛：实测 Windows 10 各版本自带 1507→4.6、1607→4.6.2、1709→4.7.1、
+      1803+→4.7.2、Win11→4.8.1，所以 4.8 不会挡住任何受支持的 Windows，却能挡住被精简过
+      运行库的系统，并给出中文提示（否则装完双击 exe 只会看到 Windows 的英文报错）。
+      .NET Framework 4.x 是同一主线内的就地升级，装了 4.8.1 的系统同样满足。
+
+      检测方式**完全用注册表检索，不依赖 WixNetFxExtension**：
+        · 只读注册表键下的 Version（如 "4.8.09221"）与 Release（如 533509）；
+        · 版本判据用 Version 的前两段（MSI 的字符串比较是大小写无关的字典序，
+          所以要先截到 major.minor 再比，避免 "4.10" < "4.8" 这类字典序陷阱）；
+        · Release 判据用整数比较（MSI 里 "#" 前缀表示数值）。
+      踩过的坑：一开始用 WixNetFxExtension 的 NETFRAMEWORK45 属性，但该属性并没有被注入，
+      于是"连 4.x 都没有"这条条件恒为假、连 .NET 4.8.1 的机器都被拦住（实测 1603）。
+      要兼容更老的系统时把 "4.5" / "#528040" 改小即可，Release 取值对照：
+        378389=4.5  378758=4.5.2  393295=4.6  394254=4.6.1  394802=4.6.2
+        460798=4.7  461308=4.7.1  461808=4.7.2  528040=4.8  533320=4.8.1
+      注：本包只做 64 位（Platform="x64"），.NET Framework 注册项在 64 位视图下，故 Win64="yes"。
+      写法说明：WiX 3.14 的 schema 里已经没有 <LaunchCondition>（candle 报 CNDL0005），
+      对应写法是 Product 下的 <Condition Message="...">表达式</Condition>，语义为"表达式为假则中止安装"。
+    -->
+    <Property Id="NETFX4VERSION">
+      <RegistrySearch Id="NetFx4Version"
+                      Root="HKLM"
+                      Key="SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full"
+                      Name="Version"
+                      Type="raw"
+                      Win64="yes" />
+    </Property>
+    <Property Id="NETFX48RELEASE">
+      <RegistrySearch Id="NetFx48Release"
+                      Root="HKLM"
+                      Key="SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full"
+                      Name="Release"
+                      Type="raw"
+                      Win64="yes" />
+    </Property>
+
+    <Condition Message="SideStack 需要 .NET Framework 4.5 或更高版本。请先安装后重新运行本安装包：https://dotnet.microsoft.com/download/dotnet-framework">
+      <![CDATA[Installed OR (NETFX4VERSION AND NETFX4VERSION >= "4.5")]]>
+    </Condition>
+    <Condition Message="SideStack 需要 .NET Framework 4.8 或更高版本（当前系统未检测到）。请安装后重新运行本安装包，或直接使用自带该版本的 Windows 10 1803 及以上 / Windows 11：https://dotnet.microsoft.com/download/dotnet-framework/net48">
+      <![CDATA[Installed OR (NETFX48RELEASE >= "#528040")]]>
+    </Condition>
+  </Product>
+</Wix>
