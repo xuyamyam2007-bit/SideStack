@@ -1,13 +1,11 @@
-# 只上传：源码(src\*.cs) + 已编译程序(SideStack.exe) + 安装包(dist\*.msi) + 资源/文档。
-# 构建脚本与工具不随仓库分发（代码仍在本机，本地照常使用）。
+# 只上传：源码(src\*.cs) + 已编译程序(SideStack.exe) + 安装包(dist\*.msi) + 资源/文档
+#         + 两个构建脚本本体(build.ps1, installer\build-msi.ps1)。
 
-# 构建脚本与工具
-build.ps1
+# 双击用的 .cmd 外壳与发布/图标工具：本机保留，不随仓库分发
 build.cmd
 build-msi.cmd
-upload-github.ps1
 upload.cmd
-installer/build-msi.ps1
+upload-github.ps1
 tools/
 
 # 编译产物（每次编译重新生成）
