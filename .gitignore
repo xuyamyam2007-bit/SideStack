@@ -9,6 +9,9 @@ SideStack.exe.bak
 # 安装包打包中间产物（.wixobj / .wixpdb / license.rtf，每次打包重新生成）
 installer/obj/
 
+# 默认版本号(1.0.0)的占位安装包：只有显式 -Version 打出的包才提交
+dist/SideStack-1.0.0-x64.msi
+
 # python 缓存
 tools/__pycache__/
 __pycache__/
