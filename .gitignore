@@ -1,4 +1,6 @@
-# 编译产物
+# 只忽略“可再生的产物 / 噪声”，源码、工具、脚本、文档、安装包全部纳入版本管理。
+
+# 编译产物（每次编译重新生成）
 SideStack.exe.new
 SideStack.exe.bak
 *.bak
@@ -7,16 +9,10 @@ SideStack.exe.bak
 # 安装包打包中间产物（.wixobj / .wixpdb / license.rtf，每次打包重新生成）
 installer/obj/
 
-# python 缓存（tools/ 整个已忽略，这里再显式写一条更稳）
+# python 缓存
 tools/__pycache__/
 __pycache__/
 *.pyc
-
-# 开发/发布工具（留在本地，不上传；需要上传时用 upload-github.ps1 -IncludeExtra）
-upload-github.ps1
-upload.cmd
-使用说明.md
-tools/
 
 # 系统 / 编辑器噪声
 Thumbs.db
