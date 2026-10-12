@@ -1,17 +1,24 @@
-# build outputs
+# 编译产物
 SideStack.exe.new
 SideStack.exe.bak
 *.bak
 *.pdb
 
-# WiX intermediate output
+# 安装包打包中间产物
 installer/obj/
 
-# python cache
+# python 缓存
 __pycache__/
 *.pyc
 
-# OS / editor noise
+# 开发/发布工具（留在本地，不上传；需要上传时用 upload-github.ps1 -IncludeExtra）
+upload-github.ps1
+upload.cmd
+启动时延测量.ps1
+使用说明.md
+tools/
+
+# 系统 / 编辑器噪声
 Thumbs.db
 desktop.ini
 .vs/
