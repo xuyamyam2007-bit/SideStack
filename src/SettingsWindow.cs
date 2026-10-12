@@ -360,10 +360,7 @@ namespace SideStack
             sp.Children.Add(CheckRow(cbAutoStart, "开机自动启动"));
 
             cbStartupPriority = MakeToggle(delegate { ApplyStartupPriority(); });
-            sp.Children.Add(CheckRow(cbStartupPriority, "启动优先级",
-                "开启后用「任务计划程序」在登录时启动，并把进程优先级设为「高于正常」（5）；" +
-                "关掉只把优先级恢复为「正常」（4）。若自启还没由计划任务接管，开启它会顺便迁移过来。" +
-                "实测本机：SideStack 比 explorer 早约 0.2 秒启动，TranslucentTB 晚约 7.5 秒。"));
+            sp.Children.Add(CheckRow(cbStartupPriority, "启动优先级"));
 
             cbDrag = MakeToggle(delegate
             {
