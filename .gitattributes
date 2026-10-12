@@ -1,0 +1,9 @@
+# 统一行尾：仓库内一律存 LF，检出也保持 LF（覆盖系统 core.autocrlf 设置）
+* text=auto eol=lf
+
+# 二进制文件不做任何行尾处理
+*.exe  binary
+*.ico  binary
+*.msi  binary
+*.dll  binary
+*.png  binary
