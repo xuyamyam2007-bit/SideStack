@@ -25,36 +25,27 @@
 2. **呼出面板**：鼠标移到屏幕**最左 / 最右边缘**，对应侧面板滑入；鼠标移开后延迟自动收回。
 3. **打开设置**：单击或双击托盘图标。
 4. **退出**：托盘右键菜单 / 面板右键菜单 / 设置窗口里的「退出 SideStack」。
-5. **随系统启动**：设置窗口里打开「开机自动启动」（写 `HKCU\...\Run`）。
+5. **随系统启动**：设置窗口里打开「开机自动启动」。
 
 设置项的完整说明、每一种面板风格的做法与实测开销、以及大量排障记录，见 **[使用说明.md](使用说明.md)**。
 
 ## 安装包（MSI）
 
-`dist\SideStack-1.0.0-x64.msi` 是现成的安装包（按用户安装到 `%LocalAppData%\Programs\SideStack`，无需管理员）：
+`dist\SideStack-1.0.1-x64.msi` 是现成的安装包（按用户安装到 `%LocalAppData%\Programs\SideStack`，无需管理员）：
 
 * 开始菜单快捷方式必装，桌面快捷方式与开机自启可选；
 * 卸载走「设置 → 应用 → 已安装的应用」。
 
-## 从源码构建
+## 关于编译
 
-**前提**：Windows 自带的 .NET Framework 编译器 `csc.exe`（无需安装 Visual Studio / .NET SDK），
-以及 WPF 程序集（系统自带）。工程**不依赖任何第三方库或原生 DLL**。
+本仓库只收录**源码、已编译好的程序与安装包**，构建脚本（`build.cmd` / `build.ps1` / `build-msi.cmd`
+与 `installer\build-msi.ps1`、`tools\make_icon.py`）不随仓库分发。
 
-```powershell
-:: 编译 exe（双击或命令行执行）
-build.cmd                 :: 等价于 powershell -ExecutionPolicy Bypass -File build.ps1
-build.cmd -Restart        :: 编译后结束旧实例并启动新版本
-build.cmd -NoBackup       :: 不生成 SideStack.exe.bak
-
-:: 打 MSI 安装包 → dist\SideStack-<版本>-x64.msi
-build-msi.cmd                          :: 用现有 SideStack.exe 打包
-build-msi.cmd -Rebuild                 :: 先重新编译 exe 再打包
-build-msi.cmd -Version 1.0.1           :: 指定版本号
-```
-
-打包 MSI 需要 [WiX Toolset v3](https://github.com/wixtoolset/wix3)；本机没有时
-`installer\build-msi.ps1` 会自动下载到 `%LOCALAPPDATA%\SideStackBuildTools\wix314`。
+无需任何脚本也能编译：本项目不依赖第三方库或原生 DLL，直接用 Windows 自带的
+`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` 编译 `src\*.cs` 即可
+（需引用 `System.dll`、`System.Core.dll`、`System.Drawing.dll`、`System.Xaml.dll`、
+`PresentationFramework.dll`、`PresentationCore.dll`、`WindowsBase.dll`，并以
+`app.manifest` 作为 `/win32manifest`、`app.ico` 作为 `/win32icon`，目标类型 `winexe`）。
 
 **源码改动即时生效**：程序启动时会比对 `src\*.cs` 与 `SideStack.exe` 的时间戳，源码更新则自动重编译并
 平滑替换正在运行的实例。所以改完源码直接双击 `SideStack.exe` 即可，不必手动编译。
@@ -65,9 +56,7 @@ build-msi.cmd -Version 1.0.1           :: 指定版本号
 ```
 ├─ SideStack.exe          已编译的主程序（单文件，无外部依赖）
 ├─ app.ico / app.manifest 图标与清单（DPI 感知、无需管理员）
-├─ build.cmd / build.ps1  编译脚本
-├─ build-msi.cmd          打 MSI 的入口
-├─ src\                   全部源码（22 个 .cs）
+├─ src\                   全部源码（23 个 .cs）
 │   ├─ App.cs             入口、心跳、显隐状态机、菜单与配置落地
 │   ├─ DockWindow.cs      面板窗口：图标槽位、滑动动画、悬停、拖动换位
 │   ├─ LensGlass.cs       「光感」液态玻璃的 CPU 实现（SDF 折射 + 色散 + 内阴影）
@@ -75,9 +64,9 @@ build-msi.cmd -Version 1.0.1           :: 指定版本号
 │   ├─ SettingsWindow.cs / Theme.cs / UiRefraction.cs   设置界面与视觉样式
 │   ├─ ScreenUtils.cs / WindowCapture.cs / NativeMethods.cs   抓屏与 Win32 封装
 │   ├─ IconLoader.cs / ShellUtils.cs / TrayIcon.cs   图标提取、资源管理器操作、托盘
+│   ├─ StartupTask.cs     计划任务版自启与进程优先级
 │   └─ AutoRebuild.cs     源码改动时自动重编译
-├─ installer\             WiX 源文件、许可协议、打包脚本与说明（见 installer\README.md）
-├─ tools\make_icon.py     生成 app.ico
+├─ installer\             WiX 源文件（安装包定义）、许可协议与说明
 ├─ dist\                  安装包输出目录
 └─ 使用说明.md             完整文档：设计要点、踩坑记录、性能实测数据
 ```
