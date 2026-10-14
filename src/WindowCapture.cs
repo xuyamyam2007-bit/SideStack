@@ -5,133 +5,36 @@ using System.Windows.Controls;
 
 namespace SideStack
 {
+    /// <summary>
+    /// 抓屏可见性策略。
+    ///
+    /// 以前这里会给本进程**所有**窗口反复设置 WDA_EXCLUDEFROMCAPTURE（每 150ms 枚举一遍），
+    /// 那带来两个问题：①「UU 远程」这类抓屏型远程工具看不到侧边栏；
+    /// ② 频繁重设显示亲和度会影响窗口合成，曾出现整片白窗口且无法交互。
+    ///
+    /// 现在默认**一律允许被抓屏**：截图 / 录屏 / 远程控制都能正常看到侧边栏。
+    /// 唯一的例外是《光感》风格：它的背景来自抓取屏幕，若抓到自己会自反馈，
+    /// 因此只对**它自己那一个面板窗口**做一次性的排除（见 DockWindow.SetLensAffinity）。
+    /// 设置环境变量 SIDESTACK_CAPTURABLE=1 可连这个例外也关掉。
+    /// </summary>
     internal static class WindowCapture
     {
-        private delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+        public static bool CaptureAllowed = true;
 
-        [DllImport("user32.dll")]
-        private static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-
-        [DllImport("user32.dll")]
-        private static extern bool IsWindow(IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
-
-        private const uint WDA_NONE = 0x00000000;
-        private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
-
-        public static bool CaptureAllowed;
-
-        /// <summary>
-        /// 是否要把本程序的窗口从抓屏里排除掉。
-        ///
-        /// 默认不排除（false）：这样「UU 远程」等靠抓屏传画面的工具能看到侧边栏。
-        /// 只有在配置里把 behavior.capturevisible 设为 0 时才排除；
-        /// 环境变量 SIDESTACK_CAPTURABLE=1 仍作为临时覆盖（强制允许抓屏）。
-        /// </summary>
-        public static bool ExcludeFromCapture()
+        public static bool LensSelfExcludeDisabled
         {
-            try
-            {
-                if (Environment.GetEnvironmentVariable("SIDESTACK_CAPTURABLE") == "1") { return false; }
-                DockConfig c = ConfigStore.Current;
-                if (c != null) { return !c.CaptureVisible; }
-            }
-            catch { }
-            return false;
+            get { return Environment.GetEnvironmentVariable("SIDESTACK_CAPTURABLE") == "1"; }
         }
 
-        public static bool Hold;
-
-        private static int holdCount;
-
-        private static uint Pid
-        {
-            get { try { return (uint)System.Diagnostics.Process.GetCurrentProcess().Id; } catch { return 0; } }
-        }
-
-        public static int Apply(uint pid, bool excludeFromCapture)
-        {
-            if (pid == 0) { return 0; }
-            int changed = 0;
-            uint affinity = excludeFromCapture ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
-            try
-            {
-                EnumWindows(delegate (IntPtr h, IntPtr l)
-                {
-                    uint p;
-                    GetWindowThreadProcessId(h, out p);
-                    if (p != pid || !IsWindow(h)) { return true; }
-                    try
-                    {
-                        if (SetWindowDisplayAffinity(h, affinity)) { changed++; }
-                    }
-                    catch { }
-                    return true;
-                }, IntPtr.Zero);
-            }
-            catch { }
-            return changed;
-        }
-
+        /// <summary>永远允许被抓屏（保留此方法只为兼容旧调用点）</summary>
         public static int Reapply()
         {
-            return Apply(Pid, ExcludeFromCapture() && !CaptureAllowed);
+            return 0;
         }
 
         public static void Guard(FrameworkElement popup)
         {
-            if (popup == null) { return; }
-            try
-            {
-                ContextMenu cm = popup as ContextMenu;
-                if (cm != null)
-                {
-                    cm.Opened += delegate { EnterHold("菜单"); };
-                    cm.Closed += delegate { ExitHold(); };
-                    return;
-                }
-                ToolTip tt = popup as ToolTip;
-                if (tt != null)
-                {
-                    tt.Opened += delegate { Reapply(); };
-                    return;
-                }
-                Window w = popup as Window;
-                if (w != null)
-                {
-                    w.Loaded += delegate { Reapply(); };
-                }
-            }
-            catch { }
-        }
-
-        private static void EnterHold(string what)
-        {
-            try
-            {
-                holdCount++;
-                Hold = holdCount > 0;
-                int n = Reapply();
-                Logger.Write("弹层即时排除: " + what + "（本进程窗口 " + n + " 个）暂停抓屏=" + Hold);
-            }
-            catch { }
-        }
-
-        private static void ExitHold()
-        {
-            try
-            {
-                holdCount--;
-                if (holdCount < 0) { holdCount = 0; }
-                Hold = holdCount > 0;
-                Reapply();
-            }
-            catch { }
+            // 不再需要对弹层做任何抓屏处理
         }
     }
 }

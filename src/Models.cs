@@ -59,17 +59,6 @@ namespace SideStack
         public double SettingsOpacity = 0.88;
 
         public bool UiRefraction = false;
-
-        /// <summary>
-        /// 侧边栏是否出现在截图 / 录屏 / 远程控制画面里。
-        ///
-        /// 默认 true：允许被抓屏。这样「UU 远程」这类靠抓屏传画面的工具能看到侧边栏。
-        /// 设为 false 时，本程序窗口会带上 WDA_EXCLUDEFROMCAPTURE 标志（Win10 2004+），
-        /// 从截图与远程画面里消失 —— 代价是远程时那块区域会变成桌面背景。
-        /// 注：《光感》风格为了不让抓屏抓到自己（自反馈），无论此项如何都会临时排除自己的面板。
-        /// </summary>
-        public bool CaptureVisible = true;
-
         public double TriggerWidth = 4;
 
         public double PeekWidth = 4;
@@ -160,7 +149,6 @@ namespace SideStack
             c.HideDesktopIcons = HideDesktopIcons;
 
             c.LensScale = LensScale; c.PeekWidth = PeekWidth; c.SettingsOpacity = SettingsOpacity; c.UiRefraction = UiRefraction;
-            c.CaptureVisible = CaptureVisible;
             foreach (string p in Ignored) { c.Ignored.Add(p); }
             foreach (string p in NoRound) { c.NoRound.Add(p); }
             foreach (string p in CustomIcons) { c.CustomIcons.Add(p); }

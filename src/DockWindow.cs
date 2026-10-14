@@ -537,27 +537,17 @@ namespace SideStack
         {
             try
             {
-                // 只有配置要求"从截图/远程画面里排除"时才排除自己；
-                // 否则保持可被抓屏（远程控制/录屏才能看到侧边栏）。
-                if (on && (capturable || !WindowCapture.ExcludeFromCapture())) { on = false; }
+                // 《光感》的玻璃背景来自抓屏，若抓到自己会自反馈 —— 所以只对它自己这个面板窗口
+                // 做一次性的"抓屏排除"。除此之外全程序一律允许被抓屏（远程/录屏/截图都能看到）。
+                if (on && WindowCapture.LensSelfExcludeDisabled) { on = false; }
                 if (hwnd == IntPtr.Zero || lensAffinity == on) { return; }
                 uint v = on ? NativeMethods.WDA_EXCLUDEFROMCAPTURE : NativeMethods.WDA_NONE;
                 bool ok = NativeMethods.SetWindowDisplayAffinity(hwnd, v);
                 lensAffinity = on && ok;
-                if (lensAffinity) { NativeMethods.DwmFlush(); }
-                Logger.Write("光感：抓屏排除自己 -> " + lensAffinity + (ok ? "" : "（API 失败，实时背景可能自反馈）"));
+                Logger.Write("光感：为保证不抓到自己，本面板窗口抓屏排除 -> " + lensAffinity
+                             + (ok ? "" : "（API 失败，实时背景可能自反馈）"));
             }
             catch (Exception ex) { Logger.Write("SetLensAffinity", ex); }
-        }
-
-        private bool capturable = Environment.GetEnvironmentVariable("SIDESTACK_CAPTURABLE") == "1";
-        public bool Capturable { get { return capturable; } }
-
-        public void SetCapturable(bool on)
-        {
-            capturable = on;
-            SetLensAffinity(!on && IsLensStyle(cfg != null ? cfg.PanelStyle : "glass"));
-            Logger.Write((on ? "允许截图: 开（面板会出现在截图/录屏里，光感背景可能自反馈）" : "允许截图: 关（已恢复抓屏排除）"));
         }
 
         private void SyncLensLive()

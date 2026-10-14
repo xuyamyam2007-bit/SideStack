@@ -36,7 +36,7 @@ namespace SideStack
         private AutoResetEvent wake;
         private volatile bool running;
         private volatile bool enabled;
-        private volatile bool affinitySet;
+
         private readonly string dumpDir;
         private bool dumped;
 
@@ -165,10 +165,9 @@ namespace SideStack
 
             if (capturer == null) { capturer = new ScreenBgraCapturer(); }
 
-            SetAffinity(true);
             byte[] src;
             try { src = capturer.Capture(wx, wy, ww, wh); }
-            finally { SetAffinity(false); }
+            catch { src = null; }
             if (src == null) { return; }
 
             int dop = Math.Max(2, Environment.ProcessorCount / 4);
@@ -239,18 +238,6 @@ namespace SideStack
             o.HighlightAlpha = 0.16;
             o.TintAlpha = Math.Max(0.0, Math.Min(0.95, tint));
             return o;
-        }
-
-        private void SetAffinity(bool on)
-        {
-            try
-            {
-                IntPtr hwnd = new WindowInteropHelper(win).Handle;
-                if (hwnd == IntPtr.Zero) { return; }
-                if (on) { NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE); affinitySet = true; }
-                else if (affinitySet) { NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_NONE); affinitySet = false; }
-            }
-            catch { }
         }
 
         private double DpiScale()

@@ -230,37 +230,10 @@ namespace SideStack
 
                 tray.CaptureRequested += delegate { AllowCaptureForAWhile(); };
 
-                captureAllowed = Environment.GetEnvironmentVariable("SIDESTACK_CAPTURABLE") == "1";
-                WindowCapture.CaptureAllowed = captureAllowed;
-                if (captureAllowed)
-                {
-                    WindowCapture.Apply((uint)System.Diagnostics.Process.GetCurrentProcess().Id, false);
-                    Logger.Write("SIDESTACK_CAPTURABLE=1：本进程所有窗口均允许截图");
-                }
-                Logger.Write("抓屏可见性: " + (WindowCapture.ExcludeFromCapture()
-                    ? "排除（远程控制/截图里看不到侧边栏）" : "允许（远程控制/截图能看到侧边栏）"));
-
-                captureWatch = new System.Windows.Threading.DispatcherTimer();
-                captureWatch.Interval = TimeSpan.FromMilliseconds(150);
-                captureWatch.Tick += delegate
-                {
-                    try
-                    {
-                        uint pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
-                        WindowCapture.Apply(pid, WindowCapture.ExcludeFromCapture() && !captureAllowed);
-                    }
-                    catch (Exception ex) { Logger.Write("captureWatch", ex); }
-                };
-                captureWatch.Start();
-
-                try
-                {
-                    System.Windows.EventManager.RegisterClassHandler(
-                        typeof(Window), Window.LoadedEvent,
-                        new EventHandler(OnWindowLoadedExcludeCapture), true);
-                    Logger.Write("已挂接窗口即时排除（Window.Loaded）");
-                }
-                catch (Exception ex) { Logger.Write("RegisterClassHandler", ex); }
+                // 抓屏可见性：默认允许（远程控制 / 录屏 / 截图都能看到侧边栏）。
+                // 不再给窗口设置 WDA_EXCLUDEFROMCAPTURE —— 那会让 UU 远程这类抓屏型远程工具看不到面板，
+                // 而且反复对全部窗口调用 SetWindowDisplayAffinity 会影响窗口合成（曾出现整片白窗口）。
+                Logger.Write("抓屏可见性: 允许（远程控制/录屏/截图都能看到侧边栏）");
 
                 RefreshHost();
                 tray.ShowBalloon("SideStack", "已在系统托盘运行：单击托盘上的 SideStack 图标即可打开设置界面。");
@@ -530,11 +503,6 @@ namespace SideStack
                     delegate { ReloadAll(); },
                     delegate { ShellUtils.RevealInExplorer(Path.GetDirectoryName(ConfigStore.FilePath)); },
                     delegate { Quit(); });
-                // 设置里切换"出现在截图/远程画面里"时，同步给左右面板（影响《光感》的抓屏排除）
-                w.pushCapturable = delegate (bool on)
-                {
-                    try { left.SetCapturable(on); right.SetCapturable(on); } catch { }
-                };
                 settingsWin = w;
                 w.Closed += delegate
                 {
@@ -657,50 +625,12 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("RegisterAppIdentity", ex); }
         }
 
-        private System.Windows.Threading.DispatcherTimer captureTimer;
-        private System.Windows.Threading.DispatcherTimer captureWatch;
-        private bool captureAllowed;
-
-        private void OnWindowLoadedExcludeCapture(object sender, EventArgs e)
-        {
-            try
-            {
-                if (captureAllowed) { return; }
-                if (sender is Window) { WindowCapture.Guard(sender as Window); return; }
-                int n = WindowCapture.Reapply();
-                Logger.Write("新窗口即时排除: 本进程窗口 " + n + " 个");
-            }
-            catch (Exception ex) { Logger.Write("OnWindowLoadedExcludeCapture", ex); }
-        }
-
         private void AllowCaptureForAWhile()
         {
+            // 现在侧边栏本来就允许被抓屏，这个托盘菜单项只作为提示保留
             try
             {
-                captureAllowed = true;
-                WindowCapture.CaptureAllowed = true;
-                left.SetCapturable(true);
-                right.SetCapturable(true);
-
-                WindowCapture.Apply((uint)System.Diagnostics.Process.GetCurrentProcess().Id, false);
-                if (captureTimer == null)
-                {
-                    captureTimer = new System.Windows.Threading.DispatcherTimer();
-                    captureTimer.Interval = TimeSpan.FromSeconds(60);
-                    captureTimer.Tick += delegate
-                    {
-                        captureTimer.Stop();
-                        captureAllowed = false;
-                        WindowCapture.CaptureAllowed = false;
-                        WindowCapture.Reapply();
-                        try { left.SetCapturable(false); right.SetCapturable(false); }
-                        catch (Exception ex) { Logger.Write("captureTimer", ex); }
-                        tray.ShowBalloon("SideStack", "已恢复：侧边栏重新从截图/录屏中排除。");
-                    };
-                }
-                captureTimer.Stop();
-                captureTimer.Start();
-                tray.ShowBalloon("SideStack", "60 秒内可以截图/录屏侧边栏；到点自动恢复抓屏排除。");
+                tray.ShowBalloon("SideStack", "侧边栏始终可以被截图/录屏/远程控制看到，无需再临时开启。");
             }
             catch (Exception ex) { Logger.Write("App.AllowCaptureForAWhile", ex); }
         }
