@@ -109,13 +109,27 @@ namespace SideStack
 
         public static int[] GridFor(int slots, double slotW, double slotH, double spacing, double availContentH)
         {
+            bool heightLimited;
+            return GridFor(slots, slotW, slotH, spacing, availContentH, out heightLimited);
+        }
+
+        /// <summary>
+        /// 决定行列数。heightLimited 为 true 表示"行数是被可用高度限制的"——
+        /// 调用方据此判断：如果再减一行，列数会增加（面板变宽），可能超出可用宽度。
+        /// </summary>
+        public static int[] GridFor(int slots, double slotW, double slotH, double spacing,
+            double availContentH, out bool heightLimited)
+        {
+            heightLimited = false;
             if (slots <= 0) { return new int[] { 1, 0 }; }
             double step = slotH + spacing;
+            if (step <= 0.0001) { step = 1; }
             int maxRows;
             if (availContentH <= 0) { maxRows = slots; }
             else { maxRows = (int)Math.Floor((availContentH + spacing) / step); }
-            if (maxRows < 1) { maxRows = 1; }
+            if (maxRows < 1) { maxRows = 1; heightLimited = true; }
             int rows = Math.Min(slots, maxRows);
+            if (rows < slots) { heightLimited = true; }
             int cols = (int)Math.Ceiling((double)slots / rows);
             return new int[] { cols, rows };
         }

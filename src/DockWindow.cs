@@ -1591,12 +1591,14 @@ namespace SideStack
 
             double availContentH = workH - EdgeMargin * 2;
             double maxPanelW = workW - EdgeMargin * 2;
+            double maxPanelH = workH - EdgeMargin * 2;
 
             bool showNames = cfg.NameMode == "always";
 
             spacing = Math.Round(cfg.IconSpacing);
             if (spacing < 0) { spacing = 0; }
 
+            double h = cfg.IconSize;
             double k = DockConfig.HoverScale - 1.0;
             double iconPad = cfg.IconPad;
 
@@ -1605,40 +1607,77 @@ namespace SideStack
             double pad = 0;
             cols = 1; rows = 0; panelH = 0; panelW = 0;
 
-            for (int iter = 0; iter < 5; iter++)
+            for (int iter = 0; iter < 6; iter++)
             {
-                iconSize = cfg.IconSize * scale;
+                iconSize = h * scale;
                 double box = iconSize + iconPad * 2 * scale;
                 slotW = showNames ? Math.Max(box, iconSize + 28 * scale) : box;
                 slotH = box + (showNames ? NameH * scale : 0);
+                if (slotW < 4) { slotW = 4; }
+                if (slotH < 4) { slotH = 4; }
 
+                // 悬停放大是"围绕格子中心"缩放的，格子距面板边缘必须留够增长量，
+                // 否则图标的背景与描边会伸到面板外面被切掉。
                 double padNeed = 0;
                 if (k > 0.0001)
                 {
                     padNeed = (slotW - 2.0 * HoverFrameInset) * k / 2.0 - HoverFrameInset + DockConfig.HoverSafeDip;
                 }
                 pad = Math.Max(DockConfig.PanelPadding, Math.Max(0, padNeed));
-                double chromeIter = pad * 2 + 2;
+                double chrome = pad * 2 + 2;
 
-                int[] g = DockConfig.GridFor(n, slotW, slotH, spacing, availContentH);
+                // 关键：行数要按"面板内容区可用高度"来算，而不是按整块屏幕。
+                // 面板自身的上下各有一份 padding，若按屏幕高度算行数，行的总高会比
+                // 内容区高出 2*pad，末尾（或最右一列）图标的背景与描边就会被面板边缘裁掉。
+                double cellH = Math.Ceiling(slotH);
+                double availRows = availContentH - chrome;
+                double rowStep = cellH + spacing;
+                int maxRows = (rowStep > 0.0001)
+                    ? (int)Math.Floor((availRows + spacing) / rowStep)
+                    : n;
+                if (maxRows < 1) { maxRows = 1; }
+                int fitRows = Math.Min(Math.Max(1, n), maxRows);
+
+                double cellW0 = Math.Ceiling(slotW);
+                bool heightLimited;
+                int[] g = DockConfig.GridFor(n, slotW, slotH, spacing, availRows, out heightLimited);
                 cols = g[0];
                 rows = g[1];
 
-                panelH = chromeIter + rows * Math.Ceiling(slotH) + ((rows > 1) ? (rows - 1) * spacing : 0);
-                panelW = chromeIter + cols * Math.Ceiling(slotW) + ((cols > 1) ? (cols - 1) * spacing : 0);
+                double needH = chrome + rows * cellH + ((rows > 1) ? (rows - 1) * spacing : 0);
+                double needW = chrome + cols * cellW0 + ((cols > 1) ? (cols - 1) * spacing : 0);
+                panelH = needH;
+                panelW = needW;
 
-                if (panelW <= maxPanelW || scale <= 0.45) { break; }
-                double kw = (maxPanelW - chromeIter) / (panelW - chromeIter);
-                if (double.IsNaN(kw) || kw <= 0) { kw = 0.9; }
-                scale *= Math.Max(0.45 / scale, Math.Min(0.98, kw));
+                // 宽度超限：先试"减一行换来更多列"是否仍放不下；
+                // 仍放不下就整体缩小（等价于等比缩小图标）。
+                bool narrowerBetter = false;
+                if (needW > maxPanelW && fitRows > 1)
+                {
+                    double wWith = chrome + Math.Ceiling((double)n / (fitRows - 1)) * cellW0
+                                   + ((Math.Ceiling((double)n / (fitRows - 1)) > 1) ? (Math.Ceiling((double)n / (fitRows - 1)) - 1) * spacing : 0);
+                    narrowerBetter = (wWith <= maxPanelW);
+                }
+
+                if (needW <= maxPanelW && needH <= maxPanelH + 0.01) { break; }
+                if (scale <= 0.45) { break; }
+                double kw = (needW > maxPanelW)
+                    ? ((maxPanelW - chrome) / Math.Max(1.0, needW - chrome))
+                    : 1.0;
+                double kh = (needH > maxPanelH)
+                    ? ((maxPanelH - chrome) / Math.Max(1.0, needH - chrome))
+                    : 1.0;
+                if (double.IsNaN(kw) || kw <= 0) { kw = narrowerBetter ? 1.0 : 0.9; }
+                if (double.IsNaN(kh) || kh <= 0) { kh = 0.9; }
+                scale *= Math.Max(0.45 / scale, Math.Min(0.98, Math.Min(kw, kh)));
             }
 
             panelPadDip = pad;
-            double chrome = pad * 2 + 2;
+            double chromeF = pad * 2 + 2;
 
-            double maxPanelH = workH - EdgeMargin * 2;
-            panelH = Math.Min(panelH, Math.Max(chrome, maxPanelH));
-            panelW = Math.Min(panelW, Math.Max(chrome, maxPanelW));
+            double maxPanelH2 = workH - EdgeMargin * 2;
+            panelH = Math.Min(panelH, Math.Max(chromeF, maxPanelH2));
+            panelW = Math.Min(panelW, Math.Max(chromeF, maxPanelW));
         }
 
         public void Relayout()
