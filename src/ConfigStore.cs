@@ -11,6 +11,9 @@ namespace SideStack
     {
         public static string FilePath = "";
 
+        /// <summary>最近一次 Load/Save 的配置对象（供 WindowCapture 等无参处查询当前设置）</summary>
+        public static DockConfig Current;
+
         public static readonly string[] TrackedExtensions = new string[]
         {
             ".lnk", ".url", ".exe", ".appref-ms", ".bat", ".cmd",
@@ -55,6 +58,7 @@ namespace SideStack
         private const string K_PEEK = "behavior.peekwidth";
         private const string K_UI_OPACITY = "ui.settingsopacity";
         private const string K_UI_REFRACT = "ui.refraction";
+        private const string K_CAPTURE_VISIBLE = "behavior.capturevisible";
         private const string K_ANIM = "behavior.animms";
         private const string K_COLLAPSE_DELAY = "behavior.collapsedelayms";
         private const string K_AUTOSTART = "behavior.autostart";
@@ -97,7 +101,8 @@ namespace SideStack
         {
             if (string.IsNullOrEmpty(FilePath) || !File.Exists(FilePath))
             {
-                return CreateDefault();
+                Current = CreateDefault();
+                return Current;
             }
 
             DockConfig c = new DockConfig();
@@ -134,6 +139,7 @@ namespace SideStack
             else if (k == K_PEEK) { c.PeekWidth = D(v, c.PeekWidth); }
             else if (k == K_UI_OPACITY) { c.SettingsOpacity = D(v, c.SettingsOpacity); }
             else if (k == K_UI_REFRACT) { c.UiRefraction = (v == "1" || v.ToLower() == "true"); }
+                    else if (k == K_CAPTURE_VISIBLE) { c.CaptureVisible = !(v == "0" || v.ToLower() == "false"); }
                     else if (k == K_ANIM) { c.AnimMs = (int)D(v, c.AnimMs); }
                     else if (k == K_COLLAPSE_DELAY) { c.CollapseDelayMs = (int)D(v, c.CollapseDelayMs); }
                     else if (k == K_AUTOSTART) { c.AutoStart = (v == "1" || v.ToLower() == "true"); }
@@ -167,12 +173,14 @@ namespace SideStack
             c.Left = left;
             c.Right = right;
             Clamp(c);
+            Current = c;
             return c;
         }
 
         public static void Save(DockConfig c)
         {
             if (string.IsNullOrEmpty(FilePath)) { return; }
+            Current = c;
             try
             {
                 BackupCurrent();
@@ -213,6 +221,12 @@ namespace SideStack
             sb.AppendLine("# ui.refraction: 设置界面各区域（窗口外壳 + 每张卡片）的边缘折射，1 = 开（默认）/ 0 = 关。");
             sb.AppendLine("#                开启时会在抓屏的一瞬间把该窗口排除出抓屏（避免自反馈），不影响截图与屏幕显示。");
             sb.AppendLine(K_UI_REFRACT + "=" + (c.UiRefraction ? "1" : "0"));
+            sb.AppendLine();
+            sb.AppendLine("# capturevisible: 侧边栏是否出现在截图 / 录屏 / 远程控制（如 UU 远程）的画面里。");
+            sb.AppendLine("#                1 = 出现在画面里（默认，远程控制能看到侧边栏）；");
+            sb.AppendLine("#                0 = 从截图与远程画面中排除（本机仍正常显示，但远程时那块区域看不到侧边栏）。");
+            sb.AppendLine("#                注：《光感》风格为避免抓屏抓到自己，无论此项如何都会临时排除自己的面板。");
+            sb.AppendLine(K_CAPTURE_VISIBLE + "=" + (c.CaptureVisible ? "1" : "0"));
             sb.AppendLine(K_TRIGGER + "=" + N(c.TriggerWidth));
                 sb.AppendLine(K_ANIM + "=" + c.AnimMs.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine(K_COLLAPSE_DELAY + "=" + c.CollapseDelayMs.ToString(CultureInfo.InvariantCulture));

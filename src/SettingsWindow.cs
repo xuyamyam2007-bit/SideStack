@@ -163,8 +163,11 @@ namespace SideStack
             Content = outer;
         }
 
-        private ToggleSwitch cbPinned, cbAutoStart, cbDrag, cbHideIcons, cbStartupPriority;
+        private ToggleSwitch cbPinned, cbAutoStart, cbDrag, cbHideIcons, cbStartupPriority, cbCaptureVisible;
         private Grid glassHost;
+
+        /// <summary>把"可被抓屏"开关推给左右面板（由 App 注入），用于同步《光感》的抓屏排除状态</summary>
+        public Action<bool> pushCapturable;
 
         private const double DragBand = 40;
 
@@ -374,7 +377,33 @@ namespace SideStack
             });
             sp.Children.Add(CheckRow(cbHideIcons, "隐藏桌面图标"));
 
+            cbCaptureVisible = MakeToggle(delegate
+            {
+                Change(delegate { cfg.CaptureVisible = cbCaptureVisible.IsChecked == true; });
+                OnCaptureVisibleChanged();
+            });
+            sp.Children.Add(CheckRow(cbCaptureVisible, "出现在截图/远程画面里",
+                "开启后侧边栏可以被截图、录屏以及「UU 远程」这类远程控制看到（默认）；" +
+                "关闭后本程序窗口会被从抓屏里排除（远程时会看不到侧边栏，但本机显示正常）。" +
+                "《光感》风格为避免抓屏抓到自己，无论此处如何都会临时排除自己的面板。"));
+
             return sp;
+        }
+
+        /// <summary>切换"出现在截图/远程画面里"后立即重新应用抓屏可见性，不必重启程序</summary>
+        private void OnCaptureVisibleChanged()
+        {
+            try
+            {
+                bool exclude = !cfg.CaptureVisible;
+                uint pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+                WindowCapture.CaptureAllowed = false;
+                int n = WindowCapture.Apply(pid, exclude);
+                if (pushCapturable != null) { pushCapturable(!exclude); }
+                Logger.Write("截图/远程可见性 -> " + (exclude ? "排除" : "允许")
+                             + "（已应用到本进程 " + n + " 个窗口）");
+            }
+            catch (Exception ex) { Logger.Write("SettingsWindow.OnCaptureVisibleChanged", ex); }
         }
 
         private FrameworkElement BuildTools()
@@ -424,6 +453,7 @@ namespace SideStack
                     if (cbPinned != null) { cbPinned.SetCheckedSilently((getPinned != null) && getPinned()); }
                     if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
                     if (cbHideIcons != null) { cbHideIcons.SetCheckedSilently(cfg.HideDesktopIcons); }
+                    if (cbCaptureVisible != null) { cbCaptureVisible.SetCheckedSilently(cfg.CaptureVisible); }
                     if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
 
                     for (int i = 0; i < refreshers.Count; i++)
@@ -965,6 +995,7 @@ namespace SideStack
             dst.AnimFps = src.AnimFps;
             dst.DragReorder = src.DragReorder;
             dst.HideDesktopIcons = src.HideDesktopIcons;
+            dst.CaptureVisible = src.CaptureVisible;
 
             dst.Ignored.Clear();
             for (int i = 0; i < src.Ignored.Count; i++) { dst.Ignored.Add(src.Ignored[i]); }

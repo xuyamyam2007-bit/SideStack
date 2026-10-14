@@ -237,6 +237,8 @@ namespace SideStack
                     WindowCapture.Apply((uint)System.Diagnostics.Process.GetCurrentProcess().Id, false);
                     Logger.Write("SIDESTACK_CAPTURABLE=1：本进程所有窗口均允许截图");
                 }
+                Logger.Write("抓屏可见性: " + (WindowCapture.ExcludeFromCapture()
+                    ? "排除（远程控制/截图里看不到侧边栏）" : "允许（远程控制/截图能看到侧边栏）"));
 
                 captureWatch = new System.Windows.Threading.DispatcherTimer();
                 captureWatch.Interval = TimeSpan.FromMilliseconds(150);
@@ -245,7 +247,7 @@ namespace SideStack
                     try
                     {
                         uint pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
-                        WindowCapture.Apply(pid, !captureAllowed);
+                        WindowCapture.Apply(pid, WindowCapture.ExcludeFromCapture() && !captureAllowed);
                     }
                     catch (Exception ex) { Logger.Write("captureWatch", ex); }
                 };
@@ -528,6 +530,11 @@ namespace SideStack
                     delegate { ReloadAll(); },
                     delegate { ShellUtils.RevealInExplorer(Path.GetDirectoryName(ConfigStore.FilePath)); },
                     delegate { Quit(); });
+                // 设置里切换"出现在截图/远程画面里"时，同步给左右面板（影响《光感》的抓屏排除）
+                w.pushCapturable = delegate (bool on)
+                {
+                    try { left.SetCapturable(on); right.SetCapturable(on); } catch { }
+                };
                 settingsWin = w;
                 w.Closed += delegate
                 {

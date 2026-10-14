@@ -537,7 +537,9 @@ namespace SideStack
         {
             try
             {
-                if (on && capturable) { on = false; }
+                // 只有配置要求"从截图/远程画面里排除"时才排除自己；
+                // 否则保持可被抓屏（远程控制/录屏才能看到侧边栏）。
+                if (on && (capturable || !WindowCapture.ExcludeFromCapture())) { on = false; }
                 if (hwnd == IntPtr.Zero || lensAffinity == on) { return; }
                 uint v = on ? NativeMethods.WDA_EXCLUDEFROMCAPTURE : NativeMethods.WDA_NONE;
                 bool ok = NativeMethods.SetWindowDisplayAffinity(hwnd, v);

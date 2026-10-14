@@ -26,6 +26,25 @@ namespace SideStack
 
         public static bool CaptureAllowed;
 
+        /// <summary>
+        /// 是否要把本程序的窗口从抓屏里排除掉。
+        ///
+        /// 默认不排除（false）：这样「UU 远程」等靠抓屏传画面的工具能看到侧边栏。
+        /// 只有在配置里把 behavior.capturevisible 设为 0 时才排除；
+        /// 环境变量 SIDESTACK_CAPTURABLE=1 仍作为临时覆盖（强制允许抓屏）。
+        /// </summary>
+        public static bool ExcludeFromCapture()
+        {
+            try
+            {
+                if (Environment.GetEnvironmentVariable("SIDESTACK_CAPTURABLE") == "1") { return false; }
+                DockConfig c = ConfigStore.Current;
+                if (c != null) { return !c.CaptureVisible; }
+            }
+            catch { }
+            return false;
+        }
+
         public static bool Hold;
 
         private static int holdCount;
@@ -61,7 +80,7 @@ namespace SideStack
 
         public static int Reapply()
         {
-            return Apply(Pid, !CaptureAllowed);
+            return Apply(Pid, ExcludeFromCapture() && !CaptureAllowed);
         }
 
         public static void Guard(FrameworkElement popup)
