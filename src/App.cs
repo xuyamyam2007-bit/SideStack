@@ -25,6 +25,8 @@ namespace SideStack
         private volatile int animThreadPeriodUs = 16000;
         private int lastCoverCheck;
         private bool desktopCovered;
+        private bool fullscreenApp;
+        private bool dockSuspended;
         private bool quitting;
 
         private static int NowMs()
@@ -269,6 +271,7 @@ namespace SideStack
                 Logger.Write("面板常显开关 -> " + panelPinned);
             }
             catch (Exception ex) { Logger.Write("TogglePanelPin", ex); }
+            SyncDockSuspension();
             RefreshHost();
         }
 
@@ -789,22 +792,32 @@ namespace SideStack
                 POINT cur;
                 if (!ScreenUtils.TryGetCursorPx(out cur)) { return; }
 
-                if (lastCoverCheck == 0 || (now - lastCoverCheck) >= 250)
+                // 挂起期间心跳已经是 200ms，就每次心跳查一次（尽快发现全屏应用退出）；
+                // 正常桌面每 250ms 查一次即可（每次要问一次 Shell，没必要更密）。
+                bool coverDue = dockSuspended || lastCoverCheck == 0 || (now - lastCoverCheck) >= 250;
+                if (coverDue)
                 {
                     lastCoverCheck = now;
-                    bool c = ScreenUtils.IsDesktopCovered();
-                    if (c != desktopCovered)
+                    ScreenUtils.DesktopState st = ScreenUtils.QueryDesktop();
+                    if (st.Covered != desktopCovered || st.Fullscreen != fullscreenApp)
                     {
-                        Logger.Write("桌面遮挡状态 -> " + c);
-                        desktopCovered = c;
+                        Logger.Write("桌面遮挡状态 -> " + st.Covered +
+                                     (st.Fullscreen ? "（全屏应用）" : "") +
+                                     (st.Covered ? "：" + st.Reason : ""));
+                        desktopCovered = st.Covered;
+                        fullscreenApp = st.Fullscreen;
+                        SyncDockSuspension();
                     }
                 }
 
-                TickDock(left, cur, now);
-                TickDock(right, cur, now);
+                if (!dockSuspended)
+                {
+                    TickDock(left, cur, now);
+                    TickDock(right, cur, now);
 
-                left.PollMenuAutoClose();
-                right.PollMenuAutoClose();
+                    left.PollMenuAutoClose();
+                    right.PollMenuAutoClose();
+                }
 
                 SyncAnimTimer();
                 RetuneHeartbeat();
@@ -813,6 +826,35 @@ namespace SideStack
             {
                 Logger.Write("OnTick", ex);
             }
+        }
+
+        /// <summary>
+        /// 桌面被大窗口 / 全屏应用占据时，把两个面板窗口**整体隐藏**（不是只移出屏幕）。
+        /// 只移出屏幕的分层置顶窗口仍参与 DWM 合成：无边框窗口化全屏时会在边缘露出一条，
+        /// 独占全屏时更会让游戏反复被这个置顶窗口打断（表现为长时间卡顿、鼠标不动）。
+        ///
+        /// 例外：「面板常显」是用户明确要求的常驻显示，普通大窗口下仍然保持显示（与旧行为一致）；
+        /// 但**全屏应用**优先级更高 —— 全屏游戏/演示期间即使勾了常显也先让位，否则就会撞上上面那两个问题。
+        /// </summary>
+        private void SyncDockSuspension()
+        {
+            try
+            {
+                bool want = desktopCovered && (fullscreenApp || !panelPinned);
+                if (want == dockSuspended) { return; }
+                dockSuspended = want;
+                if (dockSuspended)
+                {
+                    if (left != null) { left.Suspend(); }
+                    if (right != null) { right.Suspend(); }
+                }
+                else
+                {
+                    if (left != null) { left.Resume(); }
+                    if (right != null) { right.Resume(); }
+                }
+            }
+            catch (Exception ex) { Logger.Write("SyncDockSuspension", ex); }
         }
 
         private void TickDock(DockWindow d, POINT cur, int now)
@@ -1024,13 +1066,17 @@ namespace SideStack
         private void RetuneHeartbeat()
         {
             if (timer == null) { return; }
-            double want = 16.0;
+            // 面板挂起（桌面上只有全屏游戏）时没必要每 16ms 醒一次：
+            // 放到 200ms 只轮询"游戏退出了没有"，把 CPU 与计时器中断都让给游戏。
+            double want = dockSuspended ? 200.0 : 16.0;
             if (Math.Abs(timer.Interval.TotalMilliseconds - want) > 0.4)
             {
                 timer.Interval = TimeSpan.FromMilliseconds(want);
+                Logger.Write("心跳定时器 -> " + (int)want + " ms（" + (dockSuspended ? "面板已挂起" : "面板活动") + "）");
             }
 
-            HighResTimer.Require(true);
+            // 1ms 计时器精度同样只在需要推动画时才占着（它会影响整机 DPC/调度）。
+            HighResTimer.Require(!dockSuspended);
         }
     }
 }

@@ -24,6 +24,8 @@ namespace SideStack
         private static RECT cachedWork;
         private static bool monitorCached;
 
+        private static readonly uint OwnPid = (uint)Process.GetCurrentProcess().Id;
+
         public static void InvalidateMonitorCache()
         {
             monitorCached = false;
@@ -70,54 +72,179 @@ namespace SideStack
             return cachedWork;
         }
 
-        public static bool IsDesktopCovered()
+        /// <summary>桌面占用状态：被大窗口盖住、或前台是全屏应用（含独占全屏游戏）。</summary>
+        public struct DesktopState
         {
+            /// <summary>面板必须彻底消失（桌面被大窗口/全屏应用占据）。</summary>
+            public bool Covered;
+            /// <summary>前台是全屏应用：窗口盖住整块显示器，或系统报告有全屏/独占全屏应用。</summary>
+            public bool Fullscreen;
+            /// <summary>判定依据，写日志用。</summary>
+            public string Reason;
+        }
+
+        private static string QunsText(int qs)
+        {
+            switch (qs)
+            {
+                case NativeMethods.QUNS_NOT_PRESENT: return "锁屏/屏保";
+                case NativeMethods.QUNS_BUSY: return "全屏应用在前台";
+                case NativeMethods.QUNS_RUNNING_D3D_FULL_SCREEN: return "独占全屏 D3D 应用";
+                case NativeMethods.QUNS_PRESENTATION_MODE: return "演示模式";
+                default: return "状态 " + qs;
+            }
+        }
+
+        /// <summary>
+        /// 一次查询同时给出「要不要藏」和「是不是全屏应用」。
+        ///
+        /// 判定顺序：
+        /// ① 系统通知状态（SHQueryUserNotificationState）——独占全屏游戏只有这个信号可靠；
+        /// ② 前台窗口（先换成它的顶层根窗口，有些程序的"前台窗口"其实是根窗口的子窗口）
+        ///    是否盖住它自己所在的整块显示器 —— 无边框窗口化全屏游戏走这一条；
+        /// ③ 前台窗口是否盖住工作区（大窗口，保持原来的行为）；
+        /// ④ 有多个显示器时，除了"它自己那块"，再和主显示器比一次（面板只在主显示器上）。
+        ///
+        /// 之前只拿"前台窗口矩形"和"主显示器 / 主工作区"比，且只在 250ms 采样一次，
+        /// 全屏游戏上很容易漏判；漏判时收起态的面板仍留在屏幕边缘（见 DockWindow.ApplyPosition），
+        /// 就会在全屏游戏上露出一条边、并让独占全屏游戏反复被这个置顶窗口打断。
+        /// </summary>
+        public static DesktopState QueryDesktop()
+        {
+            DesktopState st = new DesktopState();
+            st.Reason = "";
+
+            // ① 系统级信号
+            try
+            {
+                int qs;
+                if (NativeMethods.SHQueryUserNotificationState(out qs) == 0 &&
+                    (qs == NativeMethods.QUNS_RUNNING_D3D_FULL_SCREEN ||
+                     qs == NativeMethods.QUNS_BUSY ||
+                     qs == NativeMethods.QUNS_PRESENTATION_MODE))
+                {
+                    st.Covered = true;
+                    st.Fullscreen = true;
+                    st.Reason = "系统通知状态=" + QunsText(qs);
+                    return st;
+                }
+            }
+            catch (Exception ex) { Logger.Write("QueryDesktop.QUNS", ex); }
+
+            // ②③④ 前台窗口
             IntPtr h = NativeMethods.GetForegroundWindow();
-            if (h == IntPtr.Zero) { return false; }
-            if (h == NativeMethods.GetDesktopWindow()) { return false; }
-            if (h == NativeMethods.GetShellWindow()) { return false; }
+            if (h == IntPtr.Zero) { return st; }
+            if (h == NativeMethods.GetDesktopWindow()) { return st; }
+            if (h == NativeMethods.GetShellWindow()) { return st; }
 
             try
             {
-                if (!NativeMethods.IsWindowVisible(h)) { return false; }
-                if (NativeMethods.IsIconic(h)) { return false; }
+                if (!NativeMethods.IsWindowVisible(h)) { return st; }
+                if (NativeMethods.IsIconic(h)) { return st; }
 
                 uint pid;
                 NativeMethods.GetWindowThreadProcessId(h, out pid);
-                if (pid == (uint)Process.GetCurrentProcess().Id) { return false; }
+                if (pid == OwnPid) { return st; }
 
-                StringBuilder sb = new StringBuilder(256);
-                NativeMethods.GetClassName(h, sb, sb.Capacity);
-                string cls = sb.ToString();
-                for (int i = 0; i < ExcludeClasses.Length; i++)
+                string cls = ClassNameOf(h);
+                if (IsExcludedClass(cls)) { return st; }
+
+                // 前台窗口可能是根窗口的子窗口（启动器 / 覆盖层常见），换成顶层窗口再比矩形
+                IntPtr root = NativeMethods.GetAncestor(h, NativeMethods.GA_ROOT);
+                if (root != IntPtr.Zero && root != h)
                 {
-                    if (string.Equals(cls, ExcludeClasses[i], StringComparison.Ordinal)) { return false; }
+                    if (!NativeMethods.IsWindowVisible(root) || NativeMethods.IsIconic(root)) { return st; }
+                    h = root;
+                    cls = ClassNameOf(h);
+                    if (IsExcludedClass(cls)) { return st; }
+                }
+
+                int cloaked;
+                if (NativeMethods.DwmGetWindowAttribute(h, NativeMethods.DWMWA_CLOAKED, out cloaked, 4) == 0 &&
+                    cloaked != 0)
+                {
+                    return st;  // DWM 隐藏的"幽灵窗口"（UWP 遗留），不算遮挡
                 }
 
                 RECT wr;
-                if (!NativeMethods.GetWindowRect(h, out wr)) { return false; }
-                if (wr.Width <= 0 || wr.Height <= 0) { return false; }
+                if (!NativeMethods.GetWindowRect(h, out wr)) { return st; }
+                if (wr.Width <= 0 || wr.Height <= 0) { return st; }
 
-                RECT mon = GetPrimaryMonitorPx();
+                string who = cls + " " + wr.Width + "×" + wr.Height;
 
-                if (wr.Left <= mon.Left + 1 && wr.Top <= mon.Top + 1 &&
-                    wr.Right >= mon.Right - 1 && wr.Bottom >= mon.Bottom - 1)
+                // 它自己所在的那块显示器
+                MONITORINFO mi = new MONITORINFO();
+                mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+                IntPtr mon = NativeMethods.MonitorFromWindow(h, NativeMethods.MONITOR_DEFAULTTONEAREST);
+                if (mon != IntPtr.Zero && NativeMethods.GetMonitorInfo(mon, ref mi))
                 {
-                    return true;
+                    if (CoversRect(wr, mi.rcMonitor, ToleranceOf(mi.rcMonitor)))
+                    {
+                        st.Covered = true; st.Fullscreen = true;
+                        st.Reason = "前台窗口盖住整块显示器（" + who + "）";
+                        return st;
+                    }
                 }
 
-                RECT work = GetPrimaryWorkPx();
-                if (wr.Left <= work.Left + 2 && wr.Top <= work.Top + 2 &&
-                    wr.Right >= work.Right - 2 && wr.Bottom >= work.Bottom - 2)
+                // 主显示器 / 主工作区（面板所在的那块）
+                RECT pmon = GetPrimaryMonitorPx();
+                if (CoversRect(wr, pmon, ToleranceOf(pmon)))
                 {
-                    return true;
+                    st.Covered = true; st.Fullscreen = true;
+                    st.Reason = "前台窗口盖住主显示器（" + who + "）";
+                    return st;
+                }
+
+                if (mon != IntPtr.Zero && CoversRect(wr, mi.rcWork, 2))
+                {
+                    st.Covered = true;
+                    st.Reason = "前台窗口盖住工作区（" + who + "）";
+                    return st;
+                }
+
+                RECT pwork = GetPrimaryWorkPx();
+                if (CoversRect(wr, pwork, 2))
+                {
+                    st.Covered = true;
+                    st.Reason = "前台窗口盖住主工作区（" + who + "）";
+                    return st;
                 }
             }
             catch (Exception ex)
             {
-                Logger.Write("IsDesktopCovered", ex);
+                Logger.Write("QueryDesktop", ex);
+            }
+            return st;
+        }
+
+        private static string ClassNameOf(IntPtr h)
+        {
+            StringBuilder sb = new StringBuilder(256);
+            NativeMethods.GetClassName(h, sb, sb.Capacity);
+            return sb.ToString();
+        }
+
+        private static bool IsExcludedClass(string cls)
+        {
+            for (int i = 0; i < ExcludeClasses.Length; i++)
+            {
+                if (string.Equals(cls, ExcludeClasses[i], StringComparison.Ordinal)) { return true; }
             }
             return false;
+        }
+
+        /// <summary>宽高各留一点余量：无边框窗口化全屏的游戏有时比显示器小 1~2 像素。</summary>
+        private static int ToleranceOf(RECT r)
+        {
+            int t = (int)Math.Round(Math.Max(r.Width, r.Height) * 0.002);
+            return t < 2 ? 2 : (t > 8 ? 8 : t);
+        }
+
+        private static bool CoversRect(RECT wr, RECT target, int tol)
+        {
+            if (target.Width <= 0 || target.Height <= 0) { return false; }
+            return wr.Left <= target.Left + tol && wr.Top <= target.Top + tol &&
+                   wr.Right >= target.Right - tol && wr.Bottom >= target.Bottom - tol;
         }
 
         public static byte[] CaptureBgraClamped(int x, int y, int w, int h)

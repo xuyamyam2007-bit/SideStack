@@ -179,6 +179,10 @@ namespace SideStack
         public const uint SWP_NOMOVE = 0x0002;
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
+        public const uint SWP_NOOWNERZORDER = 0x0200;
+
+        public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
 
         public static readonly IntPtr HWND_BROADCAST = new IntPtr(0xffff);
 
@@ -208,6 +212,30 @@ namespace SideStack
 
         [DllImport("shell32.dll")]
         public static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+        /// <summary>
+        /// 问 Shell「现在能不能弹通知」。全屏游戏（含独占全屏的 D3D 应用）与全屏演示期间，
+        /// 它会返回 QUNS_BUSY / QUNS_RUNNING_D3D_FULL_SCREEN / QUNS_PRESENTATION_MODE ——
+        /// 这是系统自己用来抑制通知/弹窗的信号，比只比窗口矩形可靠（矩形查不到时它仍然能查到）。
+        /// </summary>
+        [DllImport("shell32.dll")]
+        public static extern int SHQueryUserNotificationState(out int state);
+
+        public const int QUNS_NOT_PRESENT = 1;            // 锁屏 / 屏保 / UAC 安全桌面
+        public const int QUNS_BUSY = 2;                   // 有全屏应用在前台，或演示模式
+        public const int QUNS_RUNNING_D3D_FULL_SCREEN = 3;// 独占全屏的 D3D 应用
+        public const int QUNS_PRESENTATION_MODE = 4;      // 演示模式
+        public const int QUNS_ACCEPTS_NOTIFICATIONS = 5;  // 正常桌面
+        public const int QUNS_QUIET_TIME = 6;
+        public const int QUNS_APP = 7;                    // 前台是商店应用
+
+        public const uint GA_ROOT = 2;
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+        public const int DWMWA_CLOAKED = 14;
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
 
         public const int SHCNE_ASSOCCHANGED = 0x08000000;
         public const uint SHCNF_IDLIST = 0x0000;

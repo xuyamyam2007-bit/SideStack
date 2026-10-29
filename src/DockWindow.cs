@@ -63,6 +63,9 @@ namespace SideStack
         private const double PeekW = 4;
         private bool coveredHide;
 
+        /// <summary>桌面被大窗口 / 全屏应用占据：整个面板窗口隐藏（不参与合成），抓屏与动画全部停止。</summary>
+        private bool suspended;
+
         private IntPtr hwnd = IntPtr.Zero;
 
         private int lastPlacedWinX = int.MinValue;
@@ -553,7 +556,7 @@ namespace SideStack
         private void SyncLensLive()
         {
             bool want = (cfg != null && IsLensStyle(cfg.PanelStyle) && ItemCount > 0
-                         && !forcedHidden && (wantShow || animT > 0.001));
+                         && !forcedHidden && !suspended && (wantShow || animT > 0.001));
             if (want) { StartLensLive(); }
             else if (animT <= 0.001) { StopLensLive(); }
         }
@@ -606,6 +609,7 @@ namespace SideStack
             try
             {
                 if (!LensFollowsAnimClock()) { return; }
+                if (suspended) { return; }
                 if (ItemCount == 0 || hwnd == IntPtr.Zero) { return; }
                 if (winX == int.MinValue) { return; }
                 int w = ToPx(dockWidth), h = ToPx(dockHeight);
@@ -857,6 +861,7 @@ namespace SideStack
             {
                 if (cfg == null || !IsLensStyle(cfg.PanelStyle)) { return; }
                 if (ItemCount == 0) { return; }
+                if (suspended) { return; }   // 全屏应用期间绝不抓屏（BitBlt 会让独占全屏游戏卡死）
                 if (double.IsNaN(Width) || double.IsNaN(Height)) { return; }
                 if (lensBusy) { lensPending = true; return; }
                 if (!force && animT > 0.001) { return; }
@@ -1783,10 +1788,25 @@ namespace SideStack
             if (peekDip < 0.0) { peekDip = 0.0; }
             double rimDip = 1.0;
             double shownPanelLeft = IsLeft ? 0.0 : (monR - panelWpx);
-            double hiddenPanelLeft = IsLeft ? (-panelWpx - 12.0) : (monR + 12.0);
-            double peekPanelLeft = IsLeft
-                ? (ToPx(peekDip) - ToPx(rimDip) - panelWpx)
-                : (monR - ToPx(peekDip) + ToPx(rimDip));
+
+            // 收起位置必须让「面板 + 轮廓描边 + 色散描边 + 投影」全部离开屏幕。
+            // 面板本体外面还有 1 DIP 轮廓描边、2 DIP 色散描边，以及 ShadowPad 宽的投影区域：
+            // 以前只把面板移出 12px，剩下的投影会在屏幕边缘留下 20 多像素宽的一条暗带。
+            // 桌面上几乎看不出来，但无边框窗口化全屏的游戏上就是一条"边框"，
+            // 独占全屏时这个仍然可见的置顶分层窗口还会不断打断游戏。
+            double hiddenOff = panelWpx + shadowPadPx + 12.0;
+            double hiddenPanelLeft = IsLeft ? -hiddenOff : (monR + hiddenOff);
+            double peekPanelLeft;
+            if (peekDip <= 0.0)
+            {
+                peekPanelLeft = hiddenPanelLeft;   // peekwidth = 0 就是「屏幕边缘什么都不露」
+            }
+            else
+            {
+                peekPanelLeft = IsLeft
+                    ? (ToPx(peekDip) - ToPx(rimDip) - panelWpx)
+                    : (monR - ToPx(peekDip) + ToPx(rimDip));
+            }
             double collapsedPanelLeft = coveredHide ? hiddenPanelLeft : peekPanelLeft;
             int panelLeft = (int)Math.Round(collapsedPanelLeft + (shownPanelLeft - collapsedPanelLeft) * e);
 
@@ -1902,23 +1922,22 @@ namespace SideStack
                 return;
             }
             forcedHidden = false;
-            coveredHide = covered && !panelPinned;
+
+            bool newCoveredHide = covered && !panelPinned;
+            bool placementChanged = (newCoveredHide != coveredHide);
+            coveredHide = newCoveredHide;
 
             if (panelPinned)
             {
                 wantShow = true;
                 lastInsideMs = nowMs;
-                return;
             }
-
-            if (covered)
+            else if (covered)
             {
                 wantShow = false;
                 lastInsideMs = nowMs - cfg.CollapseDelayMs - 1;
-                return;
             }
-
-            if (inTrigger || inDock)
+            else if (inTrigger || inDock)
             {
                 wantShow = true;
                 lastInsideMs = nowMs;
@@ -1927,7 +1946,77 @@ namespace SideStack
             {
                 wantShow = false;
             }
+
+            // 「收起位置」在"露细条"与"完全出屏"之间切换时必须立刻重排一次窗口：
+            // 面板静止时没有人在推动画帧（StepAnim 在到达目标后就不再调 ApplyPosition），
+            // 少了这一次重排，窗口会停在旧位置 —— 全屏游戏盖上来以后，
+            // 屏幕边缘会残留那条本应消失的细条/投影。
+            if (placementChanged && !IsAnimating && !suspended)
+            {
+                ApplyPosition();
+            }
         }
+
+        /// <summary>桌面被大窗口 / 全屏应用占据：面板彻底隐身（窗口隐藏 + 停止抓屏与动画）。</summary>
+        public void Suspend()
+        {
+            if (suspended) { return; }
+            suspended = true;
+            try
+            {
+                wantShow = false;
+                coveredHide = true;
+                animT = 0.0;
+                animSettled = true;
+                lastTickMs = 0;
+
+                CloseAllMenus();
+                HideHoverBox();
+                StopLensLive();
+                ApplyPosition();      // 先落到完全出屏的位置、Opacity = 0
+
+                if (hwnd != IntPtr.Zero && Visibility != Visibility.Hidden)
+                {
+                    Hide();           // 连窗口一起隐藏：完全不参与 DWM 合成
+                }
+                Logger.Write("全屏/大窗口占据桌面（" + (IsLeft ? "左" : "右") + "面板）：已挂起"
+                             + "（窗口隐藏，抓屏与动画全部停止）");
+            }
+            catch (Exception ex) { Logger.Write("DockWindow.Suspend", ex); }
+        }
+
+        /// <summary>桌面恢复可用：窗口重新出现，并从收起位置继续正常工作。</summary>
+        public void Resume()
+        {
+            if (!suspended) { return; }
+            suspended = false;
+            try
+            {
+                wantShow = false;
+                coveredHide = false;
+                animT = 0.0;
+                animSettled = true;
+                lastTickMs = 0;
+                lastInsideMs = 0;
+
+                if (Visibility != Visibility.Visible) { Show(); }   // ShowActivated=false → 不会抢焦点
+
+                // Show() 之后把置顶关系重新钉一次：窗口隐藏期间它可能掉出置顶层
+                if (hwnd != IntPtr.Zero && Topmost)
+                {
+                    NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+                        NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
+                        NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER);
+                }
+
+                ApplyPosition();                                    // 收起位置（peekwidth=0 时完全出屏）
+                if (cfg != null && IsLensStyle(cfg.PanelStyle)) { UpdateLensBackdrop(false); }
+                Logger.Write("全屏/大窗口已退出（" + (IsLeft ? "左" : "右") + "面板）：已恢复");
+            }
+            catch (Exception ex) { Logger.Write("DockWindow.Resume", ex); }
+        }
+
+        public bool Suspended { get { return suspended; } }
 
         public void ForceCollapse()
         {
@@ -1945,6 +2034,7 @@ namespace SideStack
 
         public void ForceShow()
         {
+            if (suspended) { return; }   // 全屏应用期间不弹面板
             wantShow = true;
             coveredHide = false;
             lastInsideMs = Clock.NowMs();
@@ -1954,6 +2044,7 @@ namespace SideStack
 
         public bool StepAnim(int nowMs)
         {
+            if (suspended) { SyncLensLive(); lastTickMs = nowMs; return false; }
             SyncLensLive();
             if (lastTickMs == 0) { lastTickMs = nowMs; }
             double dt = nowMs - lastTickMs;
@@ -2091,7 +2182,23 @@ namespace SideStack
 
         public void PollMenuAutoClose()
         {
+            if (suspended) { return; }   // 挂起期间窗口已隐藏，菜单也已全部关闭
             CloseIdleMenus();
+        }
+
+        private void CloseAllMenus()
+        {
+            try
+            {
+                if (panelMenu != null && panelMenu.IsOpen) { panelMenu.IsOpen = false; }
+                for (int i = 0; i < grid.Children.Count; i++)
+                {
+                    Border b = grid.Children[i] as Border;
+                    if (b == null || b.ContextMenu == null) { continue; }
+                    if (b.ContextMenu.IsOpen) { b.ContextMenu.IsOpen = false; }
+                }
+            }
+            catch (Exception ex) { Logger.Write("CloseAllMenus", ex); }
         }
 
         private Rect PanelScreenRectPx()
