@@ -1,0 +1,53 @@
+name: Release
+
+# 推 v* 标签即在 GitHub 上建一条 Release，并把仓库里已提交的安装包 / 程序作为附件挂上去。
+# 不在 CI 里重新编译：本项目用 .NET Framework 的 csc.exe + WiX 3 打包，
+# 本地产物已经提交在 dist/ 与仓库根，CI 只负责"发布"这一步，稳定且不依赖工具链。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 找到本版本的安装包
+        id: assets
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "版本号: $VERSION"
+          : > assets.txt
+          if [ -f "dist/SideStack-${VERSION}-x64.msi" ]; then
+            echo "dist/SideStack-${VERSION}-x64.msi" >> assets.txt
+            echo "找到安装包: dist/SideStack-${VERSION}-x64.msi"
+          else
+            echo "::warning::仓库里没有 dist/SideStack-${VERSION}-x64.msi（提交时漏掉了？Release 将只挂 SideStack.exe）"
+          fi
+          if [ -f "SideStack.exe" ]; then
+            echo "SideStack.exe" >> assets.txt
+          fi
+          echo "本次附件:"; cat assets.txt
+          {
+            echo "files<<__ASSETS__"
+            cat assets.txt
+            echo "__ASSETS__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SideStack ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: ${{ steps.assets.outputs.files }}

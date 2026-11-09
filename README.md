@@ -67,6 +67,19 @@ powershell -ExecutionPolicy Bypass -File .\installer\build-msi.ps1 -Version 1.0.
 平滑替换正在运行的实例。所以改完源码直接双击 `SideStack.exe` 即可，不必手动编译。
 （把 `src\` 删掉程序照样运行，只是失去这个能力。）
 
+## 发布（Release）
+
+推 `v*` 标签即发布：`.github/workflows/release.yml` 会按该标签创建 Release，并挂上
+`dist/SideStack-<版本>-x64.msi` 与 `SideStack.exe` 两个附件（不依赖 CI 重新编译，直接用仓库里的产物）。
+
+```powershell
+git tag -a v1.0.2 -m "SideStack 1.0.2"
+git push origin main v1.0.2
+```
+
+注意两点：**打标签前要先把该版本的 MSI 提交进 `dist/`**（`dist/SideStack-1.0.0-x64.msi` 是默认占位包，
+已在 `.gitignore` 里，不会被提交）；标签版本号与 MSI 文件名里的版本号必须一致，否则 Release 里不会有安装包。
+
 ## 仓库结构
 
 ```
