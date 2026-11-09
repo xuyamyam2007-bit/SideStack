@@ -13,6 +13,9 @@ namespace SideStack
         public event Action OpenConfigFolderRequested;
         public event Action ExitRequested;
 
+        /// <summary>「重新检测并唤出面板」：全屏判定误判 / 系统状态滞留时的手动逃生口。</summary>
+        public event Action RecheckRequested;
+
         public event Action CaptureRequested;
 
         private WinForms.NotifyIcon notify;
@@ -44,6 +47,10 @@ namespace SideStack
             miToggle = new WinForms.ToolStripMenuItem("显示面板");
             miToggle.Click += delegate { Raise(TogglePanelRequested); };
             menu.Items.Add(miToggle);
+
+            WinForms.ToolStripMenuItem miRecheck = new WinForms.ToolStripMenuItem("重新检测并唤出面板");
+            miRecheck.Click += delegate { Raise(RecheckRequested); };
+            menu.Items.Add(miRecheck);
 
             WinForms.ToolStripMenuItem miCapture = new WinForms.ToolStripMenuItem("允许截图侧边栏（60 秒）");
             miCapture.Click += delegate { Raise(CaptureRequested); };

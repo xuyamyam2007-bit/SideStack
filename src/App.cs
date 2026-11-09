@@ -23,18 +23,28 @@ namespace SideStack
         private volatile bool animThreadRun;
         private volatile bool animTickPending;
         private volatile int animThreadPeriodUs = 16000;
-        private int lastCoverCheck;
+        private long lastCoverCheck;
         private bool desktopCovered;
         private bool fullscreenApp;
         private bool dockSuspended;
         private bool quitting;
 
-        private static int NowMs()
+        /// <summary>
+        /// "桌面已恢复"需要连续确认多少次才真正恢复。
+        /// 全屏游戏退出、切分辨率、独占全屏切回窗口的那一瞬间，观察到的状态可能来回抖，
+        /// 一次抖动就 Resume→Suspend 会让面板反复 Show/Hide（肉眼可见的闪烁），
+        /// 而且会让刚显示出来的面板立刻又消失。挂起方向立即生效，恢复方向要连续确认。
+        /// </summary>
+        private const int ClearConfirmTicks = 2;
+        private int clearStreak;
+
+        private static long NowMs()
         {
             return Clock.NowMs();
         }
         private bool layoutHooked;
         private SettingsWindow settingsWin;
+        private bool settingsHiddenBySuspension;
         private string exePath = "";
 
         private TrayIcon tray;
@@ -229,6 +239,8 @@ namespace SideStack
                     ShellUtils.RevealInExplorer(Path.GetDirectoryName(ConfigStore.FilePath));
                 };
                 tray.ExitRequested += delegate { Quit(); };
+
+                tray.RecheckRequested += delegate { ForceRecheckDesktop(); };
 
                 tray.CaptureRequested += delegate { AllowCaptureForAWhile(); };
 
@@ -510,6 +522,7 @@ namespace SideStack
                 w.Closed += delegate
                 {
                     settingsWin = null;
+                    settingsHiddenBySuspension = false;
 
                     try { left.ReassertToolWindowStyle(); right.ReassertToolWindowStyle(); } catch { }
                 };
@@ -787,7 +800,7 @@ namespace SideStack
         {
             try
             {
-                int now = NowMs();
+                long now = NowMs();
 
                 POINT cur;
                 if (!ScreenUtils.TryGetCursorPx(out cur)) { return; }
@@ -799,15 +812,52 @@ namespace SideStack
                 {
                     lastCoverCheck = now;
                     ScreenUtils.DesktopState st = ScreenUtils.QueryDesktop();
-                    if (st.Covered != desktopCovered || st.Fullscreen != fullscreenApp)
+
+                    bool changed = (st.Covered != desktopCovered) || (st.Fullscreen != fullscreenApp);
+                    if (changed)
                     {
+                        // 恢复方向（尤其是"退出全屏"）要连续确认：
+                        // 切分辨率 / 独占全屏切回窗口的瞬间，状态会抖一下，
+                        // 一次抖动就 Resume→Suspend 会让面板对游戏闪一下、也让鼠标交互断一下。
+                        // 挂起方向立即生效，解除方向需要连续 ClearConfirmTicks 次。
+                        bool isClear = !st.Covered && !st.Fullscreen;
+                        bool lostFullscreen = fullscreenApp && !st.Fullscreen;
+                        if (isClear || lostFullscreen)
+                        {
+                            clearStreak++;
+                            if (clearStreak < ClearConfirmTicks) { changed = false; }
+                        }
+                        else
+                        {
+                            clearStreak = 0;
+                        }
+                    }
+                    else
+                    {
+                        clearStreak = 0;
+                    }
+
+                    if (changed)
+                    {
+                        clearStreak = 0;
                         Logger.Write("桌面遮挡状态 -> " + st.Covered +
-                                     (st.Fullscreen ? "（全屏应用）" : "") +
+                                     (st.Fullscreen ? "（真全屏应用，面板挂起）" : "") +
                                      (st.Covered ? "：" + st.Reason : ""));
                         desktopCovered = st.Covered;
                         fullscreenApp = st.Fullscreen;
                         SyncDockSuspension();
                     }
+                }
+
+                // 不变式修复：挂起标记与面板实际状态必须一致。
+                // 任何一次异常/竞态把两者弄岔，面板就会永远停在"隐藏"或"未挂起"的错误一侧，
+                // 用户看到的就是"唤不出来"。这里每帧对齐一次，代价只有两个属性读取。
+                if (left != null && right != null &&
+                    (left.Suspended != dockSuspended || right.Suspended != dockSuspended))
+                {
+                    Logger.Write("挂起状态与面板不一致（期望 " + dockSuspended + "），已强制校正");
+                    if (dockSuspended) { left.Suspend(); right.Suspend(); }
+                    else { left.Resume(); right.Resume(); }
                 }
 
                 if (!dockSuspended)
@@ -829,22 +879,39 @@ namespace SideStack
         }
 
         /// <summary>
-        /// 桌面被大窗口 / 全屏应用占据时，把两个面板窗口**整体隐藏**（不是只移出屏幕）。
-        /// 只移出屏幕的分层置顶窗口仍参与 DWM 合成：无边框窗口化全屏时会在边缘露出一条，
-        /// 独占全屏时更会让游戏反复被这个置顶窗口打断（表现为长时间卡顿、鼠标不动）。
+        /// 面板是否整体隐身，**只看"是不是真·全屏应用"**。
         ///
-        /// 例外：「面板常显」是用户明确要求的常驻显示，普通大窗口下仍然保持显示（与旧行为一致）；
-        /// 但**全屏应用**优先级更高 —— 全屏游戏/演示期间即使勾了常显也先让位，否则就会撞上上面那两个问题。
+        /// 旧实现是 `被大窗口盖住 && (全屏 || 未勾常显)` —— 前半段让任何最大化窗口
+        /// （浏览器 / 资源管理器 / 编辑器 / 播放器）都把面板 Hide 掉。
+        /// 而全屏游戏退出后，系统通常会把焦点还给"上一个最大化窗口"：
+        /// 于是一场游戏打完，侧边栏就再也唤不出来，直到用户切到未最大化的窗口或桌面。
+        ///
+        /// 现在：普通大窗口 / 最大化窗口只让面板收起（细条不露出、窗口仍在屏外待命），
+        /// 鼠标贴边照样滑出、照样能盖在最大化窗口上；只有真全屏才 Hide。
         /// </summary>
         private void SyncDockSuspension()
         {
             try
             {
-                bool want = desktopCovered && (fullscreenApp || !panelPinned);
+                bool want = fullscreenApp;
                 if (want == dockSuspended) { return; }
                 dockSuspended = want;
+                clearStreak = 0;
                 if (dockSuspended)
                 {
+                    // 设置窗口是"置顶 + 模态"的：全屏游戏期间它必须一并让位，
+                    // 否则它会一直盖在游戏上（这是另一条与全屏应用的冲突路径）。
+                    try
+                    {
+                        if (settingsWin != null && settingsWin.IsVisible)
+                        {
+                            settingsWin.Hide();
+                            settingsHiddenBySuspension = true;
+                            Logger.Write("设置窗口已临时隐藏（全屏应用在前台）");
+                        }
+                    }
+                    catch (Exception ex3) { Logger.Write("SyncSuspension.SettingsHide", ex3); }
+
                     if (left != null) { left.Suspend(); }
                     if (right != null) { right.Suspend(); }
                 }
@@ -852,12 +919,65 @@ namespace SideStack
                 {
                     if (left != null) { left.Resume(); }
                     if (right != null) { right.Resume(); }
+
+                    try
+                    {
+                        if (settingsHiddenBySuspension)
+                        {
+                            settingsHiddenBySuspension = false;
+                            bool ok = false;
+                            try
+                            {
+                                if (settingsWin != null && !settingsWin.IsVisible) { settingsWin.Show(); }
+                                ok = (settingsWin != null && settingsWin.IsVisible);
+                            }
+                            catch (Exception ex5) { Logger.Write("SyncSuspension.SettingsShow", ex5); }
+
+                            if (!ok && settingsWin != null)
+                            {
+                                // 恢复失败就关掉它：隐藏着的模态窗口会让「设置」按钮永远打不开
+                                try { settingsWin.Close(); } catch { }
+                                settingsWin = null;
+                                Logger.Write("设置窗口无法恢复显示，已关闭（可从托盘重新打开）");
+                            }
+                            else if (settingsWin != null)
+                            {
+                                try { settingsWin.Activate(); } catch { }
+                                Logger.Write("设置窗口已恢复显示（全屏应用已退出）");
+                            }
+                        }
+                    }
+                    catch (Exception ex4) { Logger.Write("SyncSuspension.SettingsShow", ex4); }
                 }
             }
             catch (Exception ex) { Logger.Write("SyncDockSuspension", ex); }
         }
 
-        private void TickDock(DockWindow d, POINT cur, int now)
+        /// <summary>
+        /// 用户手动"重新检测并唤出面板"：清空本地判定结果 + 立刻恢复面板。
+        /// 如果确实还在全屏游戏里，下一个心跳（≤200ms）会马上重新挂起；
+        /// 如果只是系统状态滞留 / 误判，面板就回来了 —— 这是"唤不出来"的逃生口。
+        /// </summary>
+        private void ForceRecheckDesktop()
+        {
+            try
+            {
+                clearStreak = ClearConfirmTicks;
+                desktopCovered = false;
+                fullscreenApp = false;
+                lastCoverCheck = 0;
+                if (dockSuspended)
+                {
+                    dockSuspended = false;
+                    if (left != null) { left.Resume(); }
+                    if (right != null) { right.Resume(); }
+                }
+                Logger.Write("用户手动重新检测桌面状态：挂起标记已清空，面板已恢复");
+            }
+            catch (Exception ex) { Logger.Write("ForceRecheckDesktop", ex); }
+        }
+
+        private void TickDock(DockWindow d, POINT cur, long now)
         {
             double sc = d.DpiScale;
             if (sc <= 0.1 || sc > 8) { sc = 1.0; }
@@ -865,6 +985,7 @@ namespace SideStack
             bool inTrigger = IsCursorInBand(d.IsLeft, cfg.TriggerWidth, sc, cur);
             bool inDock = d.ContainsCursorDip(cur.X / sc, cur.Y / sc);
 
+            // 注意：covered 只用来"收起细条/自动收起"，面板本身仍然存活、仍然可以被唤出
             d.UpdateState(desktopCovered, inTrigger, inDock, now);
         }
 
@@ -933,6 +1054,23 @@ namespace SideStack
                         Logger.Write("显示设置已变化：显示器矩形缓存已失效");
                     }
                     catch { }
+
+                    // 分辨率 / 缩放变了，面板尺寸与行数必须重算（全屏游戏切过分辨率之后，
+                    // 只失效缓存不重排的话，面板会按旧屏尺寸占位，边缘留白或超出屏幕）。
+                    try
+                    {
+                        Dispatcher.BeginInvoke(new Action(delegate
+                        {
+                            try
+                            {
+                                ScreenUtils.InvalidateMonitorCache();
+                                if (left != null) { left.Relayout(); }
+                                if (right != null) { right.Relayout(); }
+                            }
+                            catch (Exception ex2) { Logger.Write("DisplaySettings.Relayout", ex2); }
+                        }));
+                    }
+                    catch { }
                 };
                 SystemEvents.UserPreferenceChanged += delegate (object s, UserPreferenceChangedEventArgs e)
                 {
@@ -940,6 +1078,21 @@ namespace SideStack
                     {
                         ScreenUtils.InvalidateMonitorCache();
                         Logger.Write("系统外观设置已变化（" + e.Category + "）：显示器矩形缓存已失效");
+                    }
+                    catch { }
+
+                    // 任务栏位置/自动隐藏、缩放等变化会改变工作区，面板要跟着重新靠边
+                    try
+                    {
+                        Dispatcher.BeginInvoke(new Action(delegate
+                        {
+                            try
+                            {
+                                if (left != null) { left.Relayout(); }
+                                if (right != null) { right.Relayout(); }
+                            }
+                            catch (Exception ex2) { Logger.Write("UserPreferenceChanged.Relayout", ex2); }
+                        }));
                     }
                     catch { }
                 };
@@ -1055,7 +1208,7 @@ namespace SideStack
             animTickPending = false;
         }
 
-        private void StepAnimations(int now)
+        private void StepAnimations(long now)
         {
             try { left.StepAnim(now); }
             catch (Exception ex) { Logger.Write("StepAnim.left", ex); }

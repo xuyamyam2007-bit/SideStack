@@ -88,11 +88,11 @@ namespace SideStack
         }
 
         private System.Windows.Threading.DispatcherTimer pushTimer;
-        private int lastPushMs;
+        private long lastPushMs;
 
         private void SchedulePush()
         {
-            int now = Clock.NowMs();
+            long now = Clock.NowMs();
             bool continuous = (now - lastPushMs) < 90;
             lastPushMs = now;
 

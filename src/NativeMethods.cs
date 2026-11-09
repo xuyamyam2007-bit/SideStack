@@ -71,6 +71,9 @@ namespace SideStack
     public static class NativeMethods
     {
         public const int GWL_EXSTYLE = -20;
+        public const int GWL_STYLE = -16;
+        public const int WS_CAPTION = 0x00C00000;
+        public const int WS_THICKFRAME = 0x00040000;
         public const int WS_EX_TOOLWINDOW = 0x00000080;
         public const int WS_EX_TRANSPARENT = 0x00000020;
         public const int WS_EX_NOACTIVATE = 0x08000000;
@@ -109,6 +112,10 @@ namespace SideStack
 
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd);
+
+        /// <summary>窗口是否处于"最大化"（WS_MAXIMIZE）。用来把「最大化的普通窗口」和「真全屏」区分开。</summary>
+        [DllImport("user32.dll")]
+        public static extern bool IsZoomed(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
@@ -234,8 +241,16 @@ namespace SideStack
         public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
 
         public const int DWMWA_CLOAKED = 14;
+        public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
         [DllImport("dwmapi.dll")]
         public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
+
+        /// <summary>
+        /// 取窗口「看得见的外框」，不含最大化窗口四周那条不可见的 8px 拖拽边框。
+        /// GetWindowRect 对最大化窗口会多出约 8px（这也是它盖住工作区、被误判成全屏的原因之一）。
+        /// </summary>
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out RECT value, int size);
 
         public const int SHCNE_ASSOCCHANGED = 0x08000000;
         public const uint SHCNF_IDLIST = 0x0000;

@@ -191,9 +191,16 @@ namespace SideStack
     public static class Clock
     {
         private static readonly System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
-        public static int NowMs()
+
+        /// <summary>
+        /// 进程启动以来的毫秒数。
+        /// 必须是 long：以前用 (int) 强转，开机满 24.8 天（int 毫秒上限）后会翻成负数，
+        /// 于是「展开后多久自动收起」「遮挡状态多久查一次」这些差值判断全部失效
+        /// （表现为面板一直挂着不收、或每次心跳都去问一次 Shell）。
+        /// </summary>
+        public static long NowMs()
         {
-            return (int)sw.Elapsed.TotalMilliseconds;
+            return sw.ElapsedMilliseconds;
         }
     }
 }

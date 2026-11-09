@@ -49,9 +49,9 @@ namespace SideStack
         private double dockHeight = 320;
 
         private bool wantShow;
-        private int lastInsideMs;
+        private long lastInsideMs;
         private double animT;
-        private int lastTickMs;
+        private long lastTickMs;
         private bool forcedHidden;
 
         private const double ShadowPad = 16;
@@ -72,6 +72,14 @@ namespace SideStack
         private int lastPlacedWinY = int.MinValue;
         private int stableFrames;
         private bool offsetMeasured;
+
+        /// <summary>
+        /// 下一次 ApplyPosition 必须真的调用 SetWindowPos（忽略"位置没变就跳过"的短路）。
+        /// 窗口 Hide()/Show() 之后、DPI 变化之后、强制重放位置时必须置位 ——
+        /// 否则 peekwidth=0 时"挂起位置"和"收起位置"完全重合，恢复时会被短路跳过，
+        /// 分层窗口可能停在没被重新摆放、也没被重新合成的状态。
+        /// </summary>
+        private bool forcePlacePending;
 
         private int shadowPadPx = 16;
 
@@ -138,7 +146,7 @@ namespace SideStack
         private int dragTo = -1;
         private Point dragStart;
         private bool dragging;
-        private int lastDropMs;
+        private long lastDropMs;
 
         private bool panelPinned;
 
@@ -217,21 +225,48 @@ namespace SideStack
 
         public void ReassertToolWindowStyle()
         {
+            EnsureShellStyles();
+        }
+
+        /// <summary>
+        /// 重申外壳样式（工具窗口 / 不抢焦点 / 不进任务栏 / 不进 Alt+Tab）。
+        /// Hide()→Show() 之后 WPF 会重新套用部分窗口样式，某些情况下会把扩展样式改回去，
+        /// 因此每次恢复显示都要无条件重新确认一遍（不是"值变了才写"）。
+        /// </summary>
+        private void EnsureShellStyles()
+        {
             try
             {
+                if (hwnd == IntPtr.Zero)
+                {
+                    hwnd = new WindowInteropHelper(this).Handle;
+                }
                 if (hwnd == IntPtr.Zero) { return; }
+
                 IntPtr ex = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
                 long v = ex.ToInt64();
-                v |= NativeMethods.WS_EX_TOOLWINDOW;
-                v |= NativeMethods.WS_EX_NOACTIVATE;
-                v &= ~(long)NativeMethods.WS_EX_APPWINDOW;
-                if (v != ex.ToInt64())
+                long want = v | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE;
+                want &= ~(long)NativeMethods.WS_EX_APPWINDOW;
+                if (want != v)
                 {
-                    NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(v));
-                    Logger.Write("面板外壳样式已重申（工具窗口 / 非任务栏）");
+                    NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(want));
+                    Logger.Write("面板外壳样式已重申（" + (IsLeft ? "左" : "右") + "）：工具窗口 / 非任务栏 / 不抢焦点");
                 }
             }
-            catch (Exception ex2) { Logger.Write("ReassertToolWindowStyle", ex2); }
+            catch (Exception ex2) { Logger.Write("EnsureShellStyles", ex2); }
+        }
+
+        /// <summary>把置顶关系重新钉一次：窗口隐藏期间它可能掉出置顶层。</summary>
+        private void ReassertTopmost()
+        {
+            try
+            {
+                if (hwnd == IntPtr.Zero || !Topmost) { return; }
+                NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+                    NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
+                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER);
+            }
+            catch (Exception ex) { Logger.Write("ReassertTopmost", ex); }
         }
         protected override void OnSourceInitialized(EventArgs e)
         {
@@ -561,26 +596,42 @@ namespace SideStack
             else if (animT <= 0.001) { StopLensLive(); }
         }
 
+        /// <summary>
+        /// 光感实时抓屏线程的代际号。停止时 +1，旧线程凭"代际号不再匹配"立刻退出，
+        /// 避免「停止后马上又被启动」时新旧两个线程同时在抓屏（CPU 翻倍 + 抓屏互相干扰）。
+        /// </summary>
+        private int lensGen;
+
         private void StartLensLive()
         {
             if (lensThreadRun || hwnd == IntPtr.Zero) { return; }
             SetLensAffinity(true);
             lensThreadRun = true;
             lensSig = 0;
+            int gen = ++lensGen;
             Logger.Write("光感实时循环启动（" + (IsLeft ? "左" : "右") + "）: 间隔 " + LensFrameMs + " ms → 目标 "
                          + (int)Math.Round(1000.0 / Math.Max(1, LensFrameMs)) + " fps；内部渲染 "
                          + lensScalePct + "%");
-            lensThread = new System.Threading.Thread(LensLiveLoop);
-            lensThread.IsBackground = true;
-            try { lensThread.Priority = System.Threading.ThreadPriority.BelowNormal; } catch { }
-            lensThread.Name = "SideStackLens" + (IsLeft ? "L" : "R");
-            lensThread.Start();
+            System.Threading.Thread t = new System.Threading.Thread(delegate () { LensLiveLoop(gen); });
+            t.IsBackground = true;
+            try { t.Priority = System.Threading.ThreadPriority.BelowNormal; } catch { }
+            t.Name = "SideStackLens" + (IsLeft ? "L" : "R");
+            lensThread = t;
+            t.Start();
         }
 
         private void StopLensLive()
         {
             lensThreadRun = false;
+            lensGen++;
+            System.Threading.Thread t = lensThread;
             lensThread = null;
+            if (t == null) { return; }
+            try
+            {
+                if (t != System.Threading.Thread.CurrentThread) { t.Join(90); }
+            }
+            catch { }
         }
 
         private static bool IsLensStyle(string s) { return s == "lens" || s == "lensstrong"; }
@@ -697,9 +748,9 @@ namespace SideStack
             return f;
         }
 
-        private void LensLiveLoop()
+        private void LensLiveLoop(int gen)
         {
-            while (lensThreadRun)
+            while (lensThreadRun && gen == lensGen)
             {
                 int sleep = LensFrameMs;
                 try
@@ -743,7 +794,7 @@ namespace SideStack
                 catch (Exception ex) { Logger.Write("LensLiveLoop", ex); sleep = 200; }
                 try { System.Threading.Thread.Sleep(sleep); } catch { }
             }
-            lensThreadRun = false;
+            if (gen == lensGen) { lensThreadRun = false; }
         }
 
         private int perfFrames, perfCapSum, perfRenderSum, perfRenderCount, perfPushSum, perfPushCount;
@@ -1830,12 +1881,13 @@ namespace SideStack
             else { Opacity = noFade ? 1.0 : Math.Max(e, 0.92); }
 
             bool moved = (winX != lastPlacedWinX) || (winY != lastPlacedWinY);
-            if (!moved)
+            if (!moved && !forcePlacePending)
             {
                 stableFrames++;
                 MeasureOffsetOnce(winX, winY);
                 return;
             }
+            forcePlacePending = false;
             stableFrames = 0;
 
             StepLensFrameSync(winX, winY);
@@ -1903,6 +1955,7 @@ namespace SideStack
         {
             offsetMeasured = false;
             stableFrames = 0;
+            forcePlacePending = true;
         }
 
         public bool ContainsCursorDip(double cx, double cy)
@@ -1913,7 +1966,16 @@ namespace SideStack
                 && cy >= Top - pad && cy <= Top + Height + pad;
         }
 
-        public void UpdateState(bool covered, bool inTrigger, bool inDock, int nowMs)
+        /// <summary>
+        /// 每帧状态更新。
+        ///
+        /// covered 的语义已经被收窄成"面板所在那块屏被大窗口占据"：
+        /// 它**只**决定收起后要不要露出细条（coveredHide），以及是否让面板继续常驻显示；
+        /// 它**不再**阻止唤出。否则任何最大化窗口在前台时，鼠标贴边都唤不出侧边栏 ——
+        /// 而"全屏游戏退出后系统把焦点还给上一个最大化窗口"正是用户报的那个故障。
+        /// 真·全屏由 App 判定后直接挂起（此时根本不会走到这里）。
+        /// </summary>
+        public void UpdateState(bool covered, bool inTrigger, bool inDock, long nowMs)
         {
             if (ItemCount == 0)
             {
@@ -1931,11 +1993,6 @@ namespace SideStack
             {
                 wantShow = true;
                 lastInsideMs = nowMs;
-            }
-            else if (covered)
-            {
-                wantShow = false;
-                lastInsideMs = nowMs - cfg.CollapseDelayMs - 1;
             }
             else if (inTrigger || inDock)
             {
@@ -1957,7 +2014,11 @@ namespace SideStack
             }
         }
 
-        /// <summary>桌面被大窗口 / 全屏应用占据：面板彻底隐身（窗口隐藏 + 停止抓屏与动画）。</summary>
+        /// <summary>
+        /// 桌面被真·全屏应用占据：面板彻底隐身（窗口隐藏 + 停止抓屏与动画）。
+        /// 注意：只有 Fullscreen（独占全屏 / 无边框窗口化全屏 / 演示模式）才走这里；
+        /// 普通最大化窗口只让面板收起，不会隐藏窗口 —— 否则最大化窗口一出现侧边栏就"消失"了。
+        /// </summary>
         public void Suspend()
         {
             if (suspended) { return; }
@@ -1979,7 +2040,16 @@ namespace SideStack
                 {
                     Hide();           // 连窗口一起隐藏：完全不参与 DWM 合成
                 }
-                Logger.Write("全屏/大窗口占据桌面（" + (IsLeft ? "左" : "右") + "面板）：已挂起"
+
+                // 恢复时必须重新摆放一次：peekwidth=0 时"挂起位置"与"收起位置"是同一个坐标，
+                // 若保留 lastPlacedWinX/Y，Resume 里的 ApplyPosition 会被"没移动"短路掉。
+                lastPlacedWinX = int.MinValue;
+                lastPlacedWinY = int.MinValue;
+                forcePlacePending = true;
+                offsetMeasured = false;
+                stableFrames = 0;
+
+                Logger.Write("全屏应用占据桌面（" + (IsLeft ? "左" : "右") + "面板）：已挂起"
                              + "（窗口隐藏，抓屏与动画全部停止）");
             }
             catch (Exception ex) { Logger.Write("DockWindow.Suspend", ex); }
@@ -1999,21 +2069,70 @@ namespace SideStack
                 lastTickMs = 0;
                 lastInsideMs = 0;
 
+                // 关键：不要相信任何"位置没变"的缓存，恢复必须完整重放一遍
+                lastPlacedWinX = int.MinValue;
+                lastPlacedWinY = int.MinValue;
+                forcePlacePending = true;
+                offsetMeasured = false;
+                stableFrames = 0;
+
                 if (Visibility != Visibility.Visible) { Show(); }   // ShowActivated=false → 不会抢焦点
 
-                // Show() 之后把置顶关系重新钉一次：窗口隐藏期间它可能掉出置顶层
-                if (hwnd != IntPtr.Zero && Topmost)
-                {
-                    NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-                        NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
-                        NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER);
-                }
+                EnsureShellStyles();
+                ReassertTopmost();
+
+                try { UpdateLayout(); } catch { }
 
                 ApplyPosition();                                    // 收起位置（peekwidth=0 时完全出屏）
+                try { InvalidateVisual(); } catch { }
+
                 if (cfg != null && IsLensStyle(cfg.PanelStyle)) { UpdateLensBackdrop(false); }
-                Logger.Write("全屏/大窗口已退出（" + (IsLeft ? "左" : "右") + "面板）：已恢复");
+
+                ScheduleResumeVerify();
+                Logger.Write("全屏应用已退出（" + (IsLeft ? "左" : "右") + "面板）：已恢复");
             }
             catch (Exception ex) { Logger.Write("DockWindow.Resume", ex); }
+        }
+
+        /// <summary>
+        /// 恢复后的自愈校验：Show() 之后分层窗口偶发会"看不见"（WPF 分层窗口 Hide→Show 的已知毛病），
+        /// 这里延迟一帧确认窗口真的可见，不可见就再走一遍显示流程。
+        /// </summary>
+        private void ScheduleResumeVerify()
+        {
+            try
+            {
+                DispatcherTimer t = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+                t.Interval = TimeSpan.FromMilliseconds(160);
+                t.Tick += delegate
+                {
+                    t.Stop();
+                    VerifyShown();
+                };
+                t.Start();
+            }
+            catch (Exception ex) { Logger.Write("ScheduleResumeVerify", ex); }
+        }
+
+        private void VerifyShown()
+        {
+            if (suspended) { return; }
+            try
+            {
+                if (hwnd == IntPtr.Zero || NativeMethods.IsWindowVisible(hwnd)) { return; }
+
+                Logger.Write("恢复校验：面板窗口仍不可见，重新执行显示流程（" + (IsLeft ? "左" : "右") + "）");
+                Show();
+                EnsureShellStyles();
+                ReassertTopmost();
+                forcePlacePending = true;
+                lastPlacedWinX = int.MinValue;
+                lastPlacedWinY = int.MinValue;
+                try { UpdateLayout(); } catch { }
+                ApplyPosition();
+                try { InvalidateVisual(); } catch { }
+            }
+            catch (Exception ex) { Logger.Write("VerifyShown", ex); }
         }
 
         public bool Suspended { get { return suspended; } }
@@ -2042,7 +2161,7 @@ namespace SideStack
             ApplyPosition();
         }
 
-        public bool StepAnim(int nowMs)
+        public bool StepAnim(long nowMs)
         {
             if (suspended) { SyncLensLive(); lastTickMs = nowMs; return false; }
             SyncLensLive();

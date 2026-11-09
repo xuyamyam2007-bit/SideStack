@@ -91,7 +91,7 @@ namespace SideStack
                     if (legacy == null) { return; }
                     k.DeleteValue("DeskDock", false);
                     k.SetValue(RunValueName, "\"" + exePath + "\"", RegistryValueKind.String);
-                    Logger.Write("SideStack");
+                    Logger.Write("开机自启项已从旧名 DeskDock 迁移为 " + RunValueName + " -> " + exePath);
                 }
             }
             catch { }
