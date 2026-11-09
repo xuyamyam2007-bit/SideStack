@@ -7,6 +7,7 @@ using System.Windows.Media;
 
 namespace SideStack
 {
+    // 色板窗口，用于自定义悬停色与边框色。
     public class ColorPickerWindow : Window
     {
         public Color? Result;

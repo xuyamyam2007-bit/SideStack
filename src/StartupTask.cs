@@ -6,36 +6,16 @@ using System.Text.RegularExpressions;
 
 namespace SideStack
 {
-    /// <summary>
-    /// 管理"计划任务版"的自启通道（登录时启动，可设置进程优先级）。
-    ///
-    /// 背景：HKCU\...\Run 由 Explorer 在登录后较晚才处理，面板因此出现得晚；任务计划程序
-    /// 的"登录时"触发器由计划服务启动、并且可以设置进程优先级（Run 项没有这个能力）。
-    ///
-    /// 实现选择：不引 COM（TaskScheduler 接口签名长、易错），也不依赖 PowerShell 模块，
-    /// 而是走 schtasks.exe 的官方 XML 通道：
-    ///   导出 schtasks /Query /TN <路径> /XML  ->  改 <Priority>  ->  schtasks /Create /XML 覆盖
-    /// 往返已实测：动作、触发器、运行身份、其余设置都保持不变，只有优先级变。
-    /// </summary>
+    // 计划任务方式的开机自启与启动优先级。
     internal static class StartupTask
     {
-        /// <summary>任务所在文件夹与名字（任务计划程序里显示为 SideStack\SideStack）</summary>
         public const string Folder = @"\SideStack\";
         public const string Name = "SideStack";
         private static string FullPath { get { return Folder + Name; } }
 
-        /// <summary>
-        /// 任务 XML 里的优先级刻度（0~10）。它**只当作"用户是否要提升启动优先级"的意图记录**，
-        /// 不要指望它能改变进程优先级：实测本机 Priority=4/5/6 起出来的进程都是
-        /// Normal(8)，7 反而是 BelowNormal(6)。真正的提升由程序启动时自己做（见 BoostProcess）。
-        /// </summary>
-        public const int PriorityBoostOn = 5;    // 意图：要提升
-        public const int PriorityBoostOff = 4;   // 意图：不提升
+        public const int PriorityBoostOn = 5;
+        public const int PriorityBoostOff = 4;
 
-        /// <summary>
-        /// 把当前进程的优先级提到"高于正常"。这是真正生效的那一步：
-        /// 计划任务的 Priority 字段在本机实测无效，所以在程序里自己调一次。
-        /// </summary>
         public static bool BoostProcess()
         {
             try
@@ -53,7 +33,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("StartupTask.BoostProcess", ex); return false; }
         }
 
-        /// <summary>当前进程的实际优先级（用来回填开关，避免显示与实际不符）</summary>
         public static bool IsProcessBoosted()
         {
             try
@@ -66,7 +45,6 @@ namespace SideStack
             catch { return false; }
         }
 
-        /// <summary>任务是否存在（= 已由计划任务接管登录自启）</summary>
         public static bool Exists()
         {
             try
@@ -78,7 +56,6 @@ namespace SideStack
             catch { return false; }
         }
 
-        /// <summary>读当前优先级；任务不存在或读取失败返回 0</summary>
         public static int GetPriority()
         {
             try
@@ -94,10 +71,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("StartupTask.GetPriority", ex); return 0; }
         }
 
-        /// <summary>
-        /// 用户是否开启了"启动优先级"：看任务里记的意图值，也看当前进程是否真的已经提升过
-        /// （这样用户刚切换开关、还没重启程序时，界面也不会显示成相反的旧状态）。
-        /// </summary>
         public static bool IsPriorityBoostWanted()
         {
             int p = GetPriority();
@@ -105,7 +78,6 @@ namespace SideStack
             return IsProcessBoosted();
         }
 
-        /// <summary>把任务里的"意图值"设成 要提升(true) / 不提升(false)</summary>
         public static bool SetPriorityBoostIntent(bool on)
         {
             try
@@ -120,7 +92,6 @@ namespace SideStack
                 }
                 else
                 {
-                    // 老版本任务可能没有该节点：补在 <Settings> 之后，Windows 允许这个顺序
                     patched = Regex.Replace(xml, @"(<Settings[^>]*>)", "$1<Priority>" + want + "</Priority>", RegexOptions.None);
                     if (patched == xml)
                     {
@@ -130,7 +101,7 @@ namespace SideStack
                 }
 
                 string tmp = Path.Combine(Path.GetTempPath(), "sidestack-task-priority.xml");
-                // schtasks 需要 Unicode（UTF-16）XML 文件，且声明里带 encoding="UTF-16"
+
                 File.WriteAllText(tmp, patched, new UnicodeEncoding(false, true));
 
                 int code;
@@ -144,20 +115,12 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("StartupTask.SetPriorityBoostIntent", ex); return false; }
         }
 
-        /// <summary>
-        /// 供 /TR 使用的"命令"文本：exe 全路径（含空格时加引号）。
-        /// 用固定模板建任务时也能带上它来固定 exe 路径。
-        /// </summary>
         public static string CommandFor(string exePath)
         {
             if (string.IsNullOrEmpty(exePath)) { return ""; }
             return (exePath.IndexOf(' ') >= 0) ? ("\"" + exePath + "\"") : exePath;
         }
 
-        /// <summary>
-        /// 删除任务。传入 exePath 时会先用固定模板把任务覆盖成"指向该 exe"的形式，
-        /// 避免任务里记着旧路径；随后删除。删除失败（例如被安全软件拦住）返回 false。
-        /// </summary>
         public static bool Delete(string exePath)
         {
             try
@@ -171,17 +134,11 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("StartupTask.Delete", ex); return false; }
         }
 
-        /// <summary>删除任务（不指定 exe）</summary>
         public static bool Delete()
         {
             return Delete(null);
         }
 
-        /// <summary>
-        /// 按给定优先级创建（或覆盖）登录自启任务：当前用户、交互式、不需要管理员权限，
-        /// 允许电池供电时启动、不因空闲停止、不限执行时长（常驻程序）、失败重启 3 次。
-        /// 用固定模板而不是改现有任务，保证用户机器上无论之前是什么状态都能得到一致结果。
-        /// </summary>
         public static bool Create(bool raised, string exePath)
         {
             try
@@ -216,10 +173,6 @@ namespace SideStack
             return s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
         }
 
-        /// <summary>
-        /// 任务定义模板。Priority：4 = 高于正常、5 = 正常（Windows 的 0~10 刻度）。
-        /// 其余按"礼貌但可靠"取值：电池也启动、不因空闲停止、不限时长、失败重启 3 次。
-        /// </summary>
         private const string Template =
             "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
             "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
@@ -270,20 +223,17 @@ namespace SideStack
             "  </Actions>\r\n" +
             "</Task>\r\n";
 
-        // ------------------------------------------------------------------
-
         private static bool Export(out string xml)
         {
             xml = null;
             int code;
             string output = Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath, "/XML" }, out code, 8000);
-            if (code != 0) { return false; }          // 任务不存在（或没有权限）
+            if (code != 0) { return false; }
             if (string.IsNullOrEmpty(output)) { return false; }
             xml = output;
             return true;
         }
 
-        /// <summary>跑一个控制台程序并取回输出（不弹窗口、不经过 shell）</summary>
         private static string Run(string exe, string[] args, out int exitCode, int timeoutMs)
         {
             ProcessStartInfo psi = new ProcessStartInfo(exe);

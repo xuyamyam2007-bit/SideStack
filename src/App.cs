@@ -12,6 +12,7 @@ using Microsoft.Win32;
 
 namespace SideStack
 {
+    // 应用入口：装配两侧面板、心跳定时器、托盘与配置落地。
     public class DockApp : Application
     {
         private DockConfig cfg;
@@ -29,12 +30,6 @@ namespace SideStack
         private bool dockSuspended;
         private bool quitting;
 
-        /// <summary>
-        /// "桌面已恢复"需要连续确认多少次才真正恢复。
-        /// 全屏游戏退出、切分辨率、独占全屏切回窗口的那一瞬间，观察到的状态可能来回抖，
-        /// 一次抖动就 Resume→Suspend 会让面板反复 Show/Hide（肉眼可见的闪烁），
-        /// 而且会让刚显示出来的面板立刻又消失。挂起方向立即生效，恢复方向要连续确认。
-        /// </summary>
         private const int ClearConfirmTicks = 2;
         private int clearStreak;
 
@@ -149,8 +144,6 @@ namespace SideStack
 
             ShellUtils.MigrateLegacyAutoStart(exePath);
 
-            // 「启动优先级」：计划任务里记的是"用户要不要"，真正把进程优先级提上去由这里做 ——
-            // 实测任务 XML 的 <Priority> 并不能可靠改变进程优先级（4/5/6 都是 Normal，7 反而更低）。
             if (StartupTask.IsPriorityBoostWanted()) { StartupTask.BoostProcess(); }
 
             ConfigStore.FilePath = Path.Combine(dir, "config.txt");
@@ -244,9 +237,6 @@ namespace SideStack
 
                 tray.CaptureRequested += delegate { AllowCaptureForAWhile(); };
 
-                // 抓屏可见性：默认允许（远程控制 / 录屏 / 截图都能看到侧边栏）。
-                // 不再给窗口设置 WDA_EXCLUDEFROMCAPTURE —— 那会让 UU 远程这类抓屏型远程工具看不到面板，
-                // 而且反复对全部窗口调用 SetWindowDisplayAffinity 会影响窗口合成（曾出现整片白窗口）。
                 Logger.Write("抓屏可见性: 允许（远程控制/录屏/截图都能看到侧边栏）");
 
                 RefreshHost();
@@ -643,7 +633,6 @@ namespace SideStack
 
         private void AllowCaptureForAWhile()
         {
-            // 现在侧边栏本来就允许被抓屏，这个托盘菜单项只作为提示保留
             try
             {
                 tray.ShowBalloon("SideStack", "侧边栏始终可以被截图/录屏/远程控制看到，无需再临时开启。");
@@ -805,8 +794,6 @@ namespace SideStack
                 POINT cur;
                 if (!ScreenUtils.TryGetCursorPx(out cur)) { return; }
 
-                // 挂起期间心跳已经是 200ms，就每次心跳查一次（尽快发现全屏应用退出）；
-                // 正常桌面每 250ms 查一次即可（每次要问一次 Shell，没必要更密）。
                 bool coverDue = dockSuspended || lastCoverCheck == 0 || (now - lastCoverCheck) >= 250;
                 if (coverDue)
                 {
@@ -816,10 +803,6 @@ namespace SideStack
                     bool changed = (st.Covered != desktopCovered) || (st.Fullscreen != fullscreenApp);
                     if (changed)
                     {
-                        // 恢复方向（尤其是"退出全屏"）要连续确认：
-                        // 切分辨率 / 独占全屏切回窗口的瞬间，状态会抖一下，
-                        // 一次抖动就 Resume→Suspend 会让面板对游戏闪一下、也让鼠标交互断一下。
-                        // 挂起方向立即生效，解除方向需要连续 ClearConfirmTicks 次。
                         bool isClear = !st.Covered && !st.Fullscreen;
                         bool lostFullscreen = fullscreenApp && !st.Fullscreen;
                         if (isClear || lostFullscreen)
@@ -849,9 +832,6 @@ namespace SideStack
                     }
                 }
 
-                // 不变式修复：挂起标记与面板实际状态必须一致。
-                // 任何一次异常/竞态把两者弄岔，面板就会永远停在"隐藏"或"未挂起"的错误一侧，
-                // 用户看到的就是"唤不出来"。这里每帧对齐一次，代价只有两个属性读取。
                 if (left != null && right != null &&
                     (left.Suspended != dockSuspended || right.Suspended != dockSuspended))
                 {
@@ -878,17 +858,7 @@ namespace SideStack
             }
         }
 
-        /// <summary>
-        /// 面板是否整体隐身，**只看"是不是真·全屏应用"**。
-        ///
-        /// 旧实现是 `被大窗口盖住 && (全屏 || 未勾常显)` —— 前半段让任何最大化窗口
-        /// （浏览器 / 资源管理器 / 编辑器 / 播放器）都把面板 Hide 掉。
-        /// 而全屏游戏退出后，系统通常会把焦点还给"上一个最大化窗口"：
-        /// 于是一场游戏打完，侧边栏就再也唤不出来，直到用户切到未最大化的窗口或桌面。
-        ///
-        /// 现在：普通大窗口 / 最大化窗口只让面板收起（细条不露出、窗口仍在屏外待命），
-        /// 鼠标贴边照样滑出、照样能盖在最大化窗口上；只有真全屏才 Hide。
-        /// </summary>
+        // 只有真·全屏才挂起面板；被最大化窗口盖住不算。
         private void SyncDockSuspension()
         {
             try
@@ -899,8 +869,6 @@ namespace SideStack
                 clearStreak = 0;
                 if (dockSuspended)
                 {
-                    // 设置窗口是"置顶 + 模态"的：全屏游戏期间它必须一并让位，
-                    // 否则它会一直盖在游戏上（这是另一条与全屏应用的冲突路径）。
                     try
                     {
                         if (settingsWin != null && settingsWin.IsVisible)
@@ -935,7 +903,6 @@ namespace SideStack
 
                             if (!ok && settingsWin != null)
                             {
-                                // 恢复失败就关掉它：隐藏着的模态窗口会让「设置」按钮永远打不开
                                 try { settingsWin.Close(); } catch { }
                                 settingsWin = null;
                                 Logger.Write("设置窗口无法恢复显示，已关闭（可从托盘重新打开）");
@@ -953,11 +920,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("SyncDockSuspension", ex); }
         }
 
-        /// <summary>
-        /// 用户手动"重新检测并唤出面板"：清空本地判定结果 + 立刻恢复面板。
-        /// 如果确实还在全屏游戏里，下一个心跳（≤200ms）会马上重新挂起；
-        /// 如果只是系统状态滞留 / 误判，面板就回来了 —— 这是"唤不出来"的逃生口。
-        /// </summary>
         private void ForceRecheckDesktop()
         {
             try
@@ -985,7 +947,6 @@ namespace SideStack
             bool inTrigger = IsCursorInBand(d.IsLeft, cfg.TriggerWidth, sc, cur);
             bool inDock = d.ContainsCursorDip(cur.X / sc, cur.Y / sc);
 
-            // 注意：covered 只用来"收起细条/自动收起"，面板本身仍然存活、仍然可以被唤出
             d.UpdateState(desktopCovered, inTrigger, inDock, now);
         }
 
@@ -1055,8 +1016,6 @@ namespace SideStack
                     }
                     catch { }
 
-                    // 分辨率 / 缩放变了，面板尺寸与行数必须重算（全屏游戏切过分辨率之后，
-                    // 只失效缓存不重排的话，面板会按旧屏尺寸占位，边缘留白或超出屏幕）。
                     try
                     {
                         Dispatcher.BeginInvoke(new Action(delegate
@@ -1081,7 +1040,6 @@ namespace SideStack
                     }
                     catch { }
 
-                    // 任务栏位置/自动隐藏、缩放等变化会改变工作区，面板要跟着重新靠边
                     try
                     {
                         Dispatcher.BeginInvoke(new Action(delegate
@@ -1219,8 +1177,7 @@ namespace SideStack
         private void RetuneHeartbeat()
         {
             if (timer == null) { return; }
-            // 面板挂起（桌面上只有全屏游戏）时没必要每 16ms 醒一次：
-            // 放到 200ms 只轮询"游戏退出了没有"，把 CPU 与计时器中断都让给游戏。
+
             double want = dockSuspended ? 200.0 : 16.0;
             if (Math.Abs(timer.Interval.TotalMilliseconds - want) > 0.4)
             {
@@ -1228,7 +1185,6 @@ namespace SideStack
                 Logger.Write("心跳定时器 -> " + (int)want + " ms（" + (dockSuspended ? "面板已挂起" : "面板活动") + "）");
             }
 
-            // 1ms 计时器精度同样只在需要推动画时才占着（它会影响整机 DPC/调度）。
             HighResTimer.Require(!dockSuspended);
         }
     }

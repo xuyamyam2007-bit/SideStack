@@ -7,11 +7,11 @@ using System.Windows.Threading;
 
 namespace SideStack
 {
+    // config.txt 的解析、保存与历史备份。
     public static class ConfigStore
     {
         public static string FilePath = "";
 
-        /// <summary>最近一次 Load/Save 的配置对象（供 WindowCapture 等无参处查询当前设置）</summary>
         public static DockConfig Current;
 
         public static readonly string[] TrackedExtensions = new string[]
@@ -442,6 +442,7 @@ namespace SideStack
         }
     }
 
+    // 监视桌面目录，快捷方式增删时同步面板。
     public class DesktopWatcher : IDisposable
     {
         private readonly List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();

@@ -68,6 +68,7 @@ namespace SideStack
         [PreserveSig] int GetIcon(int i, int flags, out IntPtr picon);
     }
 
+    // Win32 / DWM / Shell 的 P/Invoke 声明与常量。
     public static class NativeMethods
     {
         public const int GWL_EXSTYLE = -20;
@@ -113,7 +114,6 @@ namespace SideStack
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd);
 
-        /// <summary>窗口是否处于"最大化"（WS_MAXIMIZE）。用来把「最大化的普通窗口」和「真全屏」区分开。</summary>
         [DllImport("user32.dll")]
         public static extern bool IsZoomed(IntPtr hWnd);
 
@@ -220,21 +220,16 @@ namespace SideStack
         [DllImport("shell32.dll")]
         public static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
 
-        /// <summary>
-        /// 问 Shell「现在能不能弹通知」。全屏游戏（含独占全屏的 D3D 应用）与全屏演示期间，
-        /// 它会返回 QUNS_BUSY / QUNS_RUNNING_D3D_FULL_SCREEN / QUNS_PRESENTATION_MODE ——
-        /// 这是系统自己用来抑制通知/弹窗的信号，比只比窗口矩形可靠（矩形查不到时它仍然能查到）。
-        /// </summary>
         [DllImport("shell32.dll")]
         public static extern int SHQueryUserNotificationState(out int state);
 
-        public const int QUNS_NOT_PRESENT = 1;            // 锁屏 / 屏保 / UAC 安全桌面
-        public const int QUNS_BUSY = 2;                   // 有全屏应用在前台，或演示模式
-        public const int QUNS_RUNNING_D3D_FULL_SCREEN = 3;// 独占全屏的 D3D 应用
-        public const int QUNS_PRESENTATION_MODE = 4;      // 演示模式
-        public const int QUNS_ACCEPTS_NOTIFICATIONS = 5;  // 正常桌面
+        public const int QUNS_NOT_PRESENT = 1;
+        public const int QUNS_BUSY = 2;
+        public const int QUNS_RUNNING_D3D_FULL_SCREEN = 3;
+        public const int QUNS_PRESENTATION_MODE = 4;
+        public const int QUNS_ACCEPTS_NOTIFICATIONS = 5;
         public const int QUNS_QUIET_TIME = 6;
-        public const int QUNS_APP = 7;                    // 前台是商店应用
+        public const int QUNS_APP = 7;
 
         public const uint GA_ROOT = 2;
         [DllImport("user32.dll")]
@@ -245,11 +240,8 @@ namespace SideStack
         [DllImport("dwmapi.dll")]
         public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
 
-        /// <summary>
-        /// 取窗口「看得见的外框」，不含最大化窗口四周那条不可见的 8px 拖拽边框。
-        /// GetWindowRect 对最大化窗口会多出约 8px（这也是它盖住工作区、被误判成全屏的原因之一）。
-        /// </summary>
         [DllImport("dwmapi.dll")]
+        // 取可见外框，不含最大化窗口四周那条 8px 隐形边框。
         public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out RECT value, int size);
 
         public const int SHCNE_ASSOCCHANGED = 0x08000000;

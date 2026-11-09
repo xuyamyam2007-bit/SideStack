@@ -8,6 +8,7 @@ using System.Windows.Media;
 
 namespace SideStack
 {
+    // 设置界面。
     public class SettingsWindow : Window
     {
         private readonly DockConfig cfg;
@@ -513,7 +514,6 @@ namespace SideStack
             return CheckRow(ts, label, null);
         }
 
-        /// <summary>开关行；hint 非空时在开关下面再加一行小字说明（缩进与标签列对齐）</summary>
         private static Grid CheckRow(ToggleSwitch ts, string label, string hint)
         {
             Grid g = new Grid();
@@ -549,14 +549,12 @@ namespace SideStack
             return g;
         }
 
-        /// <summary>独立的小字说明（与开关行的提示同款样式）</summary>
         private static TextBlock Hint(string s)
         {
             TextBlock t = Theme.Hint(s);
             t.Margin = new Thickness(LabelW, 2, 0, 2);
             return t;
         }
-
 
         private static Grid ButtonGrid(int count, params FrameworkElement[] buttons)
         {
@@ -822,9 +820,6 @@ namespace SideStack
                 bool taskExists = StartupTask.Exists();
                 Logger.Write("开机自启 -> " + (want ? "开" : "关") + "（计划任务存在 " + taskExists + "）");
 
-                // 登录自启有两条通道：Run 项与计划任务。两条同时存在会启动两份，所以始终只留一条：
-                //   打开 -> 已有计划任务就保持它（不再补写 Run 项）；否则写 Run 项
-                //   关闭 -> 删掉计划任务 + 删掉 Run 项（任务引用的就是当前 exe，删掉即失效）
                 if (want)
                 {
                     if (!taskExists)
@@ -843,7 +838,6 @@ namespace SideStack
 
                 Change(delegate { cfg.AutoStart = want; });
 
-                // 回填开关的真实状态：写盘失败或被拦截时，不让界面显示成"已生效"
                 if (cbAutoStart != null)
                 {
                     cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists());
@@ -856,15 +850,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyAutoStart", ex); }
         }
 
-        /// <summary>
-        /// 「启动优先级」开关。
-        ///
-        /// 背景（本机实测）：计划任务 XML 里的 &lt;Priority&gt; 并不可靠 —— Priority=4/5/6
-        /// 起出来的进程都是 Normal(8)，7 反而变成 BelowNormal(6)。所以真正提升优先级这件事
-        /// 由程序启动时自己做（StartupTask.BoostProcess），任务里的值只作为"用户要不要"的意图记录。
-        /// 切换开关时立即作用到当前进程，不用等下次登录。
-        /// 若登录自启还挂在 Run 项上，会顺便迁移成计划任务版（避免两条通道并存）。
-        /// </summary>
         private void ApplyStartupPriority()
         {
             try
@@ -889,7 +874,6 @@ namespace SideStack
                     StartupTask.SetPriorityBoostIntent(want);
                 }
 
-                // 立即作用到当前进程（关掉时是"下次启动不再提升"，本次运行不强行降回去）
                 if (want) { StartupTask.BoostProcess(); }
 
                 if (cbStartupPriority != null)

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace SideStack
 {
+    // 面板里的一个图标槽位，IsEmpty 表示空白位。
     public class DockItem
     {
         public string Path = "";
@@ -28,6 +29,7 @@ namespace SideStack
         }
     }
 
+    // 全部配置项与面板网格计算。
     public class DockConfig
     {
         public const double PanelRadius = 16;
@@ -113,10 +115,6 @@ namespace SideStack
             return GridFor(slots, slotW, slotH, spacing, availContentH, out heightLimited);
         }
 
-        /// <summary>
-        /// 决定行列数。heightLimited 为 true 表示"行数是被可用高度限制的"——
-        /// 调用方据此判断：如果再减一行，列数会增加（面板变宽），可能超出可用宽度。
-        /// </summary>
         public static int[] GridFor(int slots, double slotW, double slotH, double spacing,
             double availContentH, out bool heightLimited)
         {
@@ -188,16 +186,11 @@ namespace SideStack
 
 namespace SideStack
 {
+    // 进程启动以来的毫秒数；必须是 long，int 毫秒 24.8 天就会溢出。
     public static class Clock
     {
         private static readonly System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
 
-        /// <summary>
-        /// 进程启动以来的毫秒数。
-        /// 必须是 long：以前用 (int) 强转，开机满 24.8 天（int 毫秒上限）后会翻成负数，
-        /// 于是「展开后多久自动收起」「遮挡状态多久查一次」这些差值判断全部失效
-        /// （表现为面板一直挂着不收、或每次心跳都去问一次 Shell）。
-        /// </summary>
         public static long NowMs()
         {
             return sw.ElapsedMilliseconds;

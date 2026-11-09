@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace SideStack
 {
+    // 读取显示器分辨率与刷新率，用于动画帧率上限。
     public static class DisplayInfo
     {
         private const int ENUM_CURRENT_SETTINGS = -1;

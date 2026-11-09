@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace SideStack
 {
+    // 持有/释放 timeBeginPeriod(1)，动画期间需要 1ms 计时精度。
     internal static class HighResTimer
     {
         [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]

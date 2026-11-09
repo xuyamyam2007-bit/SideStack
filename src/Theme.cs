@@ -11,6 +11,7 @@ using System.Windows.Threading;
 
 namespace SideStack
 {
+    // 界面主题：玻璃面板、按钮、标题栏与入场动画。
     public static class Theme
     {
         public static readonly Color Accent = Color.FromRgb(0x2B, 0x6C, 0xE8);
@@ -799,6 +800,7 @@ namespace SideStack
         }
     }
 
+    // 开关控件。
     public class ToggleSwitch : ContentControl
     {
         private Border track;

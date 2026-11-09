@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 
 namespace SideStack
 {
+    // 提取快捷方式与程序图标，并按圆角参数加工。
     public static class IconLoader
     {
         private static double radiusRatio = 0.22;

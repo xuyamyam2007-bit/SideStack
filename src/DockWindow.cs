@@ -12,6 +12,7 @@ using System.Windows.Threading;
 
 namespace SideStack
 {
+    // 侧边面板窗口：图标布局、滑入滑出、拖动排序、右键菜单。
     public class DockWindow : Window
     {
         public bool IsLeft;
@@ -63,7 +64,6 @@ namespace SideStack
         private const double PeekW = 4;
         private bool coveredHide;
 
-        /// <summary>桌面被大窗口 / 全屏应用占据：整个面板窗口隐藏（不参与合成），抓屏与动画全部停止。</summary>
         private bool suspended;
 
         private IntPtr hwnd = IntPtr.Zero;
@@ -73,12 +73,7 @@ namespace SideStack
         private int stableFrames;
         private bool offsetMeasured;
 
-        /// <summary>
-        /// 下一次 ApplyPosition 必须真的调用 SetWindowPos（忽略"位置没变就跳过"的短路）。
-        /// 窗口 Hide()/Show() 之后、DPI 变化之后、强制重放位置时必须置位 ——
-        /// 否则 peekwidth=0 时"挂起位置"和"收起位置"完全重合，恢复时会被短路跳过，
-        /// 分层窗口可能停在没被重新摆放、也没被重新合成的状态。
-        /// </summary>
+        // Hide()/Show() 后必须强制重放位置：peekwidth=0 时挂起位置与收起位置重合。
         private bool forcePlacePending;
 
         private int shadowPadPx = 16;
@@ -121,9 +116,7 @@ namespace SideStack
         }
 
         private volatile int lensScalePct = 60;
-        // TransparentBrush 是 Freeze() 过的共享画刷：只能用在"永远不再改"的属性上。
-        // 图标槽位的 Background 不能用它 —— 悬停底色靠对该画刷做动画实现（见 CreateItemBox 的
-        // AnimateBrush），冻结画刷不可动画，异常被吞掉后表现为"悬停底色整个没了"。
+
         private readonly ScreenBgraCapturer lensCapturer = new ScreenBgraCapturer();
         private readonly byte[][] lensDst = new byte[2][];
         private int lensDstSlot;
@@ -228,11 +221,6 @@ namespace SideStack
             EnsureShellStyles();
         }
 
-        /// <summary>
-        /// 重申外壳样式（工具窗口 / 不抢焦点 / 不进任务栏 / 不进 Alt+Tab）。
-        /// Hide()→Show() 之后 WPF 会重新套用部分窗口样式，某些情况下会把扩展样式改回去，
-        /// 因此每次恢复显示都要无条件重新确认一遍（不是"值变了才写"）。
-        /// </summary>
         private void EnsureShellStyles()
         {
             try
@@ -256,7 +244,6 @@ namespace SideStack
             catch (Exception ex2) { Logger.Write("EnsureShellStyles", ex2); }
         }
 
-        /// <summary>把置顶关系重新钉一次：窗口隐藏期间它可能掉出置顶层。</summary>
         private void ReassertTopmost()
         {
             try
@@ -575,8 +562,6 @@ namespace SideStack
         {
             try
             {
-                // 《光感》的玻璃背景来自抓屏，若抓到自己会自反馈 —— 所以只对它自己这个面板窗口
-                // 做一次性的"抓屏排除"。除此之外全程序一律允许被抓屏（远程/录屏/截图都能看到）。
                 if (on && WindowCapture.LensSelfExcludeDisabled) { on = false; }
                 if (hwnd == IntPtr.Zero || lensAffinity == on) { return; }
                 uint v = on ? NativeMethods.WDA_EXCLUDEFROMCAPTURE : NativeMethods.WDA_NONE;
@@ -596,10 +581,6 @@ namespace SideStack
             else if (animT <= 0.001) { StopLensLive(); }
         }
 
-        /// <summary>
-        /// 光感实时抓屏线程的代际号。停止时 +1，旧线程凭"代际号不再匹配"立刻退出，
-        /// 避免「停止后马上又被启动」时新旧两个线程同时在抓屏（CPU 翻倍 + 抓屏互相干扰）。
-        /// </summary>
         private int lensGen;
 
         private void StartLensLive()
@@ -912,7 +893,7 @@ namespace SideStack
             {
                 if (cfg == null || !IsLensStyle(cfg.PanelStyle)) { return; }
                 if (ItemCount == 0) { return; }
-                if (suspended) { return; }   // 全屏应用期间绝不抓屏（BitBlt 会让独占全屏游戏卡死）
+                if (suspended) { return; }
                 if (double.IsNaN(Width) || double.IsNaN(Height)) { return; }
                 if (lensBusy) { lensPending = true; return; }
                 if (!force && animT > 0.001) { return; }
@@ -1664,8 +1645,6 @@ namespace SideStack
                 if (slotW < 4) { slotW = 4; }
                 if (slotH < 4) { slotH = 4; }
 
-                // 悬停放大是"围绕格子中心"缩放的，格子距面板边缘必须留够增长量，
-                // 否则图标的背景与描边会伸到面板外面被切掉。
                 double padNeed = 0;
                 if (k > 0.0001)
                 {
@@ -1674,9 +1653,6 @@ namespace SideStack
                 pad = Math.Max(DockConfig.PanelPadding, Math.Max(0, padNeed));
                 double chrome = pad * 2 + 2;
 
-                // 关键：行数要按"面板内容区可用高度"来算，而不是按整块屏幕。
-                // 面板自身的上下各有一份 padding，若按屏幕高度算行数，行的总高会比
-                // 内容区高出 2*pad，末尾（或最右一列）图标的背景与描边就会被面板边缘裁掉。
                 double cellH = Math.Ceiling(slotH);
                 double availRows = availContentH - chrome;
                 double rowStep = cellH + spacing;
@@ -1697,8 +1673,6 @@ namespace SideStack
                 panelH = needH;
                 panelW = needW;
 
-                // 宽度超限：先试"减一行换来更多列"是否仍放不下；
-                // 仍放不下就整体缩小（等价于等比缩小图标）。
                 bool narrowerBetter = false;
                 if (needW > maxPanelW && fitRows > 1)
                 {
@@ -1840,17 +1814,12 @@ namespace SideStack
             double rimDip = 1.0;
             double shownPanelLeft = IsLeft ? 0.0 : (monR - panelWpx);
 
-            // 收起位置必须让「面板 + 轮廓描边 + 色散描边 + 投影」全部离开屏幕。
-            // 面板本体外面还有 1 DIP 轮廓描边、2 DIP 色散描边，以及 ShadowPad 宽的投影区域：
-            // 以前只把面板移出 12px，剩下的投影会在屏幕边缘留下 20 多像素宽的一条暗带。
-            // 桌面上几乎看不出来，但无边框窗口化全屏的游戏上就是一条"边框"，
-            // 独占全屏时这个仍然可见的置顶分层窗口还会不断打断游戏。
             double hiddenOff = panelWpx + shadowPadPx + 12.0;
             double hiddenPanelLeft = IsLeft ? -hiddenOff : (monR + hiddenOff);
             double peekPanelLeft;
             if (peekDip <= 0.0)
             {
-                peekPanelLeft = hiddenPanelLeft;   // peekwidth = 0 就是「屏幕边缘什么都不露」
+                peekPanelLeft = hiddenPanelLeft;
             }
             else
             {
@@ -1966,15 +1935,7 @@ namespace SideStack
                 && cy >= Top - pad && cy <= Top + Height + pad;
         }
 
-        /// <summary>
-        /// 每帧状态更新。
-        ///
-        /// covered 的语义已经被收窄成"面板所在那块屏被大窗口占据"：
-        /// 它**只**决定收起后要不要露出细条（coveredHide），以及是否让面板继续常驻显示；
-        /// 它**不再**阻止唤出。否则任何最大化窗口在前台时，鼠标贴边都唤不出侧边栏 ——
-        /// 而"全屏游戏退出后系统把焦点还给上一个最大化窗口"正是用户报的那个故障。
-        /// 真·全屏由 App 判定后直接挂起（此时根本不会走到这里）。
-        /// </summary>
+        // covered 不再阻止唤出，只决定细条与自动收起。
         public void UpdateState(bool covered, bool inTrigger, bool inDock, long nowMs)
         {
             if (ItemCount == 0)
@@ -2004,21 +1965,12 @@ namespace SideStack
                 wantShow = false;
             }
 
-            // 「收起位置」在"露细条"与"完全出屏"之间切换时必须立刻重排一次窗口：
-            // 面板静止时没有人在推动画帧（StepAnim 在到达目标后就不再调 ApplyPosition），
-            // 少了这一次重排，窗口会停在旧位置 —— 全屏游戏盖上来以后，
-            // 屏幕边缘会残留那条本应消失的细条/投影。
             if (placementChanged && !IsAnimating && !suspended)
             {
                 ApplyPosition();
             }
         }
 
-        /// <summary>
-        /// 桌面被真·全屏应用占据：面板彻底隐身（窗口隐藏 + 停止抓屏与动画）。
-        /// 注意：只有 Fullscreen（独占全屏 / 无边框窗口化全屏 / 演示模式）才走这里；
-        /// 普通最大化窗口只让面板收起，不会隐藏窗口 —— 否则最大化窗口一出现侧边栏就"消失"了。
-        /// </summary>
         public void Suspend()
         {
             if (suspended) { return; }
@@ -2034,15 +1986,13 @@ namespace SideStack
                 CloseAllMenus();
                 HideHoverBox();
                 StopLensLive();
-                ApplyPosition();      // 先落到完全出屏的位置、Opacity = 0
+                ApplyPosition();
 
                 if (hwnd != IntPtr.Zero && Visibility != Visibility.Hidden)
                 {
-                    Hide();           // 连窗口一起隐藏：完全不参与 DWM 合成
+                    Hide();
                 }
 
-                // 恢复时必须重新摆放一次：peekwidth=0 时"挂起位置"与"收起位置"是同一个坐标，
-                // 若保留 lastPlacedWinX/Y，Resume 里的 ApplyPosition 会被"没移动"短路掉。
                 lastPlacedWinX = int.MinValue;
                 lastPlacedWinY = int.MinValue;
                 forcePlacePending = true;
@@ -2055,7 +2005,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("DockWindow.Suspend", ex); }
         }
 
-        /// <summary>桌面恢复可用：窗口重新出现，并从收起位置继续正常工作。</summary>
         public void Resume()
         {
             if (!suspended) { return; }
@@ -2069,21 +2018,20 @@ namespace SideStack
                 lastTickMs = 0;
                 lastInsideMs = 0;
 
-                // 关键：不要相信任何"位置没变"的缓存，恢复必须完整重放一遍
                 lastPlacedWinX = int.MinValue;
                 lastPlacedWinY = int.MinValue;
                 forcePlacePending = true;
                 offsetMeasured = false;
                 stableFrames = 0;
 
-                if (Visibility != Visibility.Visible) { Show(); }   // ShowActivated=false → 不会抢焦点
+                if (Visibility != Visibility.Visible) { Show(); }
 
                 EnsureShellStyles();
                 ReassertTopmost();
 
                 try { UpdateLayout(); } catch { }
 
-                ApplyPosition();                                    // 收起位置（peekwidth=0 时完全出屏）
+                ApplyPosition();
                 try { InvalidateVisual(); } catch { }
 
                 if (cfg != null && IsLensStyle(cfg.PanelStyle)) { UpdateLensBackdrop(false); }
@@ -2094,10 +2042,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("DockWindow.Resume", ex); }
         }
 
-        /// <summary>
-        /// 恢复后的自愈校验：Show() 之后分层窗口偶发会"看不见"（WPF 分层窗口 Hide→Show 的已知毛病），
-        /// 这里延迟一帧确认窗口真的可见，不可见就再走一遍显示流程。
-        /// </summary>
         private void ScheduleResumeVerify()
         {
             try
@@ -2153,7 +2097,7 @@ namespace SideStack
 
         public void ForceShow()
         {
-            if (suspended) { return; }   // 全屏应用期间不弹面板
+            if (suspended) { return; }
             wantShow = true;
             coveredHide = false;
             lastInsideMs = Clock.NowMs();
@@ -2301,7 +2245,7 @@ namespace SideStack
 
         public void PollMenuAutoClose()
         {
-            if (suspended) { return; }   // 挂起期间窗口已隐藏，菜单也已全部关闭
+            if (suspended) { return; }
             CloseIdleMenus();
         }
 

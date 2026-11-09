@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 
 namespace SideStack
 {
+    // 《光感》风格的渲染参数。
     public sealed class LensGlassOptions
     {
         public int Width;
@@ -95,6 +96,7 @@ namespace SideStack
         }
     }
 
+    // 《光感》液态玻璃的 CPU 渲染：折射、色散、内阴影。
     public static class LensGlassRenderer
     {
         public static byte[] Render(byte[] src, int srcW, int srcH, LensGlassOptions o, int maxDop = 0,

@@ -4,6 +4,7 @@ using System.Text;
 
 namespace SideStack
 {
+    // 追加写 %APPDATA%\SideStack\sidestack.log。
     public static class Logger
     {
         public static string Path = "";

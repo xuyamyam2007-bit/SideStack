@@ -6,6 +6,7 @@ using Microsoft.Win32;
 
 namespace SideStack
 {
+    // 启动程序、定位文件、桌面图标显隐、开机自启。
     public static class ShellUtils
     {
         public const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";

@@ -7,6 +7,7 @@ using System.Windows;
 
 namespace SideStack
 {
+    // 启动自检：源码比 exe 新时调用 csc 重新编译并平滑替换自身。
     public static class AutoRebuild
     {
         private const string TempExeName = "SideStack.exe.new";

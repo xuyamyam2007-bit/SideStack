@@ -10,6 +10,7 @@ using System.Windows.Threading;
 
 namespace SideStack
 {
+    // 面板边缘折射效果，目前未接入界面。
     public sealed class UiRefraction
     {
         private sealed class Region

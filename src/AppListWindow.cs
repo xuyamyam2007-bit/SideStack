@@ -7,6 +7,7 @@ using Microsoft.Win32;
 
 namespace SideStack
 {
+    // 往面板里添加图标时的程序/文件选择列表。
     public class AppListWindow : Window
     {
         private DockConfig d;

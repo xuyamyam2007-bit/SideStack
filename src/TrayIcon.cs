@@ -6,6 +6,7 @@ using WinForms = System.Windows.Forms;
 
 namespace SideStack
 {
+    // 系统托盘图标与右键菜单。
     public class TrayIcon : IDisposable
     {
         public event Action SettingsRequested;
@@ -13,7 +14,6 @@ namespace SideStack
         public event Action OpenConfigFolderRequested;
         public event Action ExitRequested;
 
-        /// <summary>「重新检测并唤出面板」：全屏判定误判 / 系统状态滞留时的手动逃生口。</summary>
         public event Action RecheckRequested;
 
         public event Action CaptureRequested;

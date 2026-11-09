@@ -5,6 +5,7 @@ using System.Text;
 
 namespace SideStack
 {
+    // 桌面遮挡与全屏判定、显示器矩形缓存、屏幕抓取。
     public static class ScreenUtils
     {
         private static readonly string[] ExcludeClasses = new string[]
@@ -72,25 +73,11 @@ namespace SideStack
             return cachedWork;
         }
 
-        /// <summary>
-        /// 桌面占用状态。两个标志含义完全不同，处理方式也不同：
-        ///
-        ///   Covered    —— 前台有个窗口把「面板所在的那块屏」的工作区盖住了（典型：任何最大化窗口）。
-        ///                 它只用来决定「收起态要不要在屏幕边缘露出那条细条」，以及自动收起面板。
-        ///                 **绝不能用它隐藏面板窗口** —— 那会让侧边栏在最大化窗口出现时整体消失，
-        ///                 而用户往往正是想在最大化窗口上唤出侧边栏。
-        ///
-        ///   Fullscreen —— 前台是真·全屏应用（独占全屏 / 无边框窗口化全屏 / 演示模式）。
-        ///                 这时面板必须整体隐身（窗口 Hide），否则会盖在游戏上、
-        ///                 还会让独占全屏游戏反复被这个置顶分层窗口打断。是否挂起只看这一个标志。
-        /// </summary>
+        // Covered 只影响收起细条与自动收起；只有 Fullscreen 才允许隐藏面板窗口。
         public struct DesktopState
         {
-            /// <summary>面板所在那块屏被大窗口占据（含最大化窗口）。只影响"细条"与自动收起。</summary>
             public bool Covered;
-            /// <summary>前台是真·全屏应用。面板必须整体隐身。</summary>
             public bool Fullscreen;
-            /// <summary>判定依据，写日志用。</summary>
             public string Reason;
         }
 
@@ -106,37 +93,13 @@ namespace SideStack
             }
         }
 
-        /// <summary>
-        /// 「独占全屏」信号连续多少次拿到"不吻合"的几何证据就认为它滞留了。
-        /// 游戏切换分辨率时显示器矩形与窗口矩形会短暂不一致（缓存也可能慢一拍），
-        /// 所以阈值给得宽松：心跳在挂起态 200ms 一次，50 次 ≈ 10 秒。
-        /// 这段窗口是"宁可多等一会儿也不能在游戏里弹出面板"的取舍；
-        /// 若确实是误判，托盘菜单「重新检测并唤出面板」可以立刻恢复。
-        /// </summary>
         private const int D3dStaleLimit = 50;
 
         private static int d3dNoGeometryStreak;
         private static bool d3dStaleReported;
         private static bool qunsShellLogged;
 
-        /// <summary>
-        /// 一次查询同时给出「要不要收细条」和「是不是真全屏」。
-        ///
-        /// 关键原则：**只有真·全屏才允许把面板整体隐藏**；普通大窗口/最大化窗口只算"占据"。
-        /// 旧实现把这两件事混成一个 Covered 标志，于是任何最大化窗口（浏览器 / 资源管理器 / 编辑器）
-        /// 都会让面板 Hide()，而全屏游戏退出后系统往往把焦点还给"上一个最大化窗口" ——
-        /// 面板因此持续挂起、鼠标贴边毫无反应，表现就是「全屏游戏退出后唤不出侧边栏」。
-        ///
-        /// 判定顺序：
-        /// ① 先取前台窗口并做有效性筛查（可见、非最小化、非 DWM 隐藏、非本进程、非桌面/任务栏类）。
-        ///    这一步决定了"前台到底有没有一个应用窗口" —— 也是系统状态滞留时的兜底。
-        /// ② QUNS = 独占全屏 D3D：最强信号，直接判全屏，但要求连续 D3dStaleLimit 次都拿不到
-        ///    几何支持才降级（防滞留）。
-        /// ③ 可见外框盖住面板所在显示器、且窗口**不是最大化** → 无边框窗口化全屏。
-        /// ④ 可见外框盖住工作区 → 只判"占据"（最大化窗口走这一条）。
-        ///
-        /// 另外所有比较都只针对**主显示器**（面板只存在于这块屏）：副屏上的全屏游戏不该让主屏的侧边栏消失。
-        /// </summary>
+        // 判定顺序：前台有效性筛查 → QUNS（独占全屏直判）→ 几何 → 工作区，不要调换。
         public static DesktopState QueryDesktop()
         {
             DesktopState st = new DesktopState();
@@ -169,7 +132,6 @@ namespace SideStack
                         NativeMethods.GetWindowThreadProcessId(h, out pid);
                         if (pid != OwnPid)
                         {
-                            // 前台窗口可能是根窗口的子窗口（启动器 / 覆盖层常见），换成顶层窗口再判断
                             IntPtr root = NativeMethods.GetAncestor(h, NativeMethods.GA_ROOT);
                             if (root != IntPtr.Zero) { h = root; }
 
@@ -199,9 +161,6 @@ namespace SideStack
             RECT pwork = GetPrimaryWorkPx();
             if (pwork.Width <= 100 || pwork.Height <= 100) { pwork = pmon; }
 
-            // ② QUNS：它只描述"前台是不是全屏应用"，必须和"前台确实有一个应用窗口"交叉校验。
-            //    游戏退出/崩溃后 Shell 状态可能滞留，此时前台已经是桌面或别的程序，
-            //    若继续相信 QUNS，侧边栏就永远唤不出来。
             try
             {
                 int qs;
@@ -225,8 +184,7 @@ namespace SideStack
                     else if (qs == NativeMethods.QUNS_RUNNING_D3D_FULL_SCREEN)
                     {
                         qunsShellLogged = false;
-                        // 独占全屏：切分辨率瞬间窗口矩形会短暂不可信，所以"拿不到几何"本身不算反证；
-                        // 只有**确实拿到了矩形、而它不盖住显示器**才累计滞留次数。
+
                         if (!haveFrame) { d3dNoGeometryStreak = 0; d3dStaleReported = false; }
                         else if (CoversRect(frame, pmon, ToleranceOf(pmon))) { d3dNoGeometryStreak = 0; d3dStaleReported = false; }
                         else { d3dNoGeometryStreak++; }
@@ -274,13 +232,11 @@ namespace SideStack
 
             string who = cls + " " + frame.Width + "×" + frame.Height;
 
-            // 面板只存在于主显示器：窗口和主屏没有交集就与本程序无关（副屏全屏游戏不该影响主屏侧边栏）
             if (!Intersects(frame, pmon))
             {
                 return st;
             }
 
-            // ③ 盖住整块主显示器、且"形状像全屏" → 无边框窗口化全屏
             if (FullscreenShaped(frame, pmon, zoomed, normalFrame))
             {
                 st.Covered = true;
@@ -289,7 +245,6 @@ namespace SideStack
                 return st;
             }
 
-            // ④ 盖住工作区 → 只算占据（最大化窗口 / 铺满的普通窗口），面板保留、只收细条
             if (CoversRect(frame, pwork, 3))
             {
                 st.Covered = true;
@@ -300,24 +255,17 @@ namespace SideStack
             return st;
         }
 
-        /// <summary>两个矩形是否有交集（零面积不算）。</summary>
         private static bool Intersects(RECT a, RECT b)
         {
             return a.Left < b.Right && a.Right > b.Left && a.Top < b.Bottom && a.Bottom > b.Top;
         }
 
-        /// <summary>
-        /// 窗口是否带"标准外框"（标题栏 + 可调整边框）。
-        /// 最大化普通窗口 = true；无边框全屏游戏（WS_POPUP、去掉标题栏）= false。
-        /// 这是「盖住整块显示器的窗口到底是全屏游戏还是最大化窗口」的最后一道判别依据 ——
-        /// 光看矩形分不出来（无边框全屏游戏有的也会带 WS_MAXIMIZE），只能看外框样式。
-        /// </summary>
         private static bool HasNormalFrame(IntPtr h)
         {
             try
             {
                 long style = NativeMethods.GetWindowLongPtr(h, NativeMethods.GWL_STYLE).ToInt64();
-                if (style == 0) { return true; }   // 取不到样式时按"普通窗口"处理，宁可让面板可用
+                if (style == 0) { return true; }
                 bool caption = (style & NativeMethods.WS_CAPTION) == NativeMethods.WS_CAPTION;
                 bool thick = (style & NativeMethods.WS_THICKFRAME) != 0;
                 return caption && thick;
@@ -325,19 +273,12 @@ namespace SideStack
             catch { return true; }
         }
 
-        /// <summary>
-        /// 「形状像全屏」：可见外框盖住整块显示器，并且不是"带标准外框的最大化窗口"。
-        /// </summary>
         private static bool FullscreenShaped(RECT frame, RECT monitor, bool zoomed, bool normalFrame)
         {
             if (!CoversRect(frame, monitor, ToleranceOf(monitor))) { return false; }
             return !zoomed || !normalFrame;
         }
 
-        /// <summary>
-        /// 取窗口"看得见的外框"。优先 DWM 扩展帧边界（最大化窗口不含那条 8px 隐形边框），
-        /// 失败时退回 GetWindowRect；分屏/全屏切换的瞬间可能拿到空矩形，此时返回 false。
-        /// </summary>
         private static bool TryGetVisibleFrame(IntPtr h, out RECT r)
         {
             r = new RECT();
@@ -379,7 +320,6 @@ namespace SideStack
             return false;
         }
 
-        /// <summary>宽高各留一点余量：无边框窗口化全屏的游戏有时比显示器小 1~2 像素。</summary>
         private static int ToleranceOf(RECT r)
         {
             int t = (int)Math.Round(Math.Max(r.Width, r.Height) * 0.002);
@@ -452,6 +392,7 @@ namespace SideStack
         }
     }
 
+    // BitBlt 抓屏，复用 DIB 缓冲。
     public sealed class ScreenBgraCapturer
     {
         private int w, h;

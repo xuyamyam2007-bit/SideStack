@@ -6,6 +6,7 @@ using System.Windows.Media;
 
 namespace SideStack
 {
+    // 轻量模态对话框：文本输入与确认。
     public static class Dialog
     {
         public static string Prompt(string title, string message, string def)

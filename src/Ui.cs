@@ -4,6 +4,7 @@ using System.Windows.Media;
 
 namespace SideStack
 {
+    // 颜色解析与画刷构造。
     public static class Ui
     {
         public static Color ParseColor(string hex, Color fallback)
