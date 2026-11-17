@@ -1126,7 +1126,7 @@ namespace SideStack
                     lensWb.WritePixels(new Int32Rect(0, 0, w, h), glass, w * 4, 0);
 
                     if (cfg != null && IsLensStyle(cfg.PanelStyle)) { panel.Background = lensBrush; }
-                    Logger.Write("光感玻璃底已更新: " + w + "×" + h + " px, " + ms + " ms");
+                    Logger.WriteThrottled("光感底图", 5000, "光感玻璃底已更新: " + w + "×" + h + " px, " + ms + " ms");
                 }
                 catch (Exception ex) { Logger.Write("ApplyLensBitmap", ex); }
             }
@@ -1189,7 +1189,7 @@ namespace SideStack
                     : IconLoader.Get(item.Path);
                 if (customIcon != null || Math.Abs(iconScale - 1.0) > 0.001)
                 {
-                    Logger.Write("单图标外观: " + item.Path + " → 图片=[" + (customIcon == null ? "默认" : customIcon) + "] 缩放=" + iconScale.ToString("F2"));
+                    Logger.WriteThrottled("图标外观", 5000, "单图标外观: " + item.Path + " → 图片=[" + (customIcon == null ? "默认" : customIcon) + "] 缩放=" + iconScale.ToString("F2"));
                 }
                 if (Math.Abs(iconScale - 1.0) > 0.001)
                 {

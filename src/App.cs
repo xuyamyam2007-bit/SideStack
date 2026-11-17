@@ -885,7 +885,7 @@ namespace SideStack
             }
             catch (Exception ex)
             {
-                Logger.Write("OnTick", ex);
+                Logger.WriteThrottled("OnTick", 1000, "OnTick: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
