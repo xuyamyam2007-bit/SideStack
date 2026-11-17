@@ -1239,7 +1239,8 @@ namespace SideStack
 
             b.MouseLeftButtonUp += delegate (object s, MouseButtonEventArgs me)
             {
-                if (dragging || MovedFar(me.GetPosition(this))) { return; }
+                if (dragging) { return; }
+                if (dragBox == b && MovedFar(me.GetPosition(this))) { return; }
                 me.Handled = true;
                 if (ItemActivated != null) { ItemActivated(this, item); }
             };
@@ -1334,6 +1335,7 @@ namespace SideStack
             dragFrom = -1;
             dragTo = -1;
             dragging = false;
+            dragStart = new Point(double.NaN, double.NaN);   // 显式“未拖动”哨兵
 
             if (box != null)
             {
@@ -1490,6 +1492,7 @@ namespace SideStack
 
         private bool MovedFar(Point p)
         {
+            if (dragBox == null) { return false; }
             return Math.Abs(p.X - dragStart.X) > 6 || Math.Abs(p.Y - dragStart.Y) > 6;
         }
 
@@ -1557,9 +1560,8 @@ namespace SideStack
                 miIconClear.Header = "恢复默认图标";
                 miIconClear.Click += delegate
                 {
-                    if (CustomIconRequested != null) { CustomIconRequested(this, item); }
+                    if (CustomIconCleared != null) { CustomIconCleared(this, item); }
                 };
-                miIconClear.Tag = "clear";
                 cm.Items.Add(miIconClear);
             }
 
