@@ -94,7 +94,8 @@ namespace SideStack
         private void SchedulePush()
         {
             long now = Clock.NowMs();
-            bool continuous = (now - lastPushMs) < 90;
+            // 250ms 才算是“连续拖动”。以前是 90ms，拖滑块时几乎每次事件都排一次全量推送。
+            bool continuous = (now - lastPushMs) < 250;
             lastPushMs = now;
 
             if (!continuous)
@@ -106,7 +107,7 @@ namespace SideStack
             if (pushTimer == null)
             {
                 pushTimer = new System.Windows.Threading.DispatcherTimer();
-                pushTimer.Interval = TimeSpan.FromMilliseconds(90);
+                pushTimer.Interval = TimeSpan.FromMilliseconds(250);
                 pushTimer.Tick += delegate
                 {
                     pushTimer.Stop();

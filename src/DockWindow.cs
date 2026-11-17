@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -90,6 +91,7 @@ namespace SideStack
         private bool lensBusy;
         private bool lensPending;
         private long lensBusyAt;
+        private string itemSig;
 
         private WriteableBitmap lensWb;
         private System.Threading.Thread lensThread;
@@ -480,6 +482,7 @@ namespace SideStack
         private void RebuildItems()
         {
             UpdateDpi();
+            itemSig = BuildItemSig(cfg);
 
             DetachAnimations(grid);
 
@@ -2326,12 +2329,48 @@ namespace SideStack
 
         public void ApplyConfig(DockConfig config)
         {
+            // 只有“影响项构建”的字段变了才重建；拖动纯动画/触边类滑块不再全量重解码图标。
+            string sig = BuildItemSig(config);
+            bool rebuild = (sig != itemSig);
+
             cfg = config;
             ApplyLensKnobs(config);
-            RebuildItems();
+            if (rebuild) { RebuildItems(); }
             Relayout();
+        }
 
-            if (IsLensStyle(cfg.PanelStyle)) { RequestLensRefresh(80); }
+        private string BuildItemSig(DockConfig c)
+        {
+            if (c == null) { return ""; }
+            StringBuilder sb = new StringBuilder();
+            sb.Append(c.IconSize).Append('|').Append(c.IconSpacing).Append('|').Append(c.IconPad)
+              .Append('|').Append(c.NameMode).Append('|').Append(c.HoverColor).Append('|').Append(c.HoverOpacity)
+              .Append('|').Append(c.HoverBorderColor).Append('|').Append(c.HoverBorderWidth)
+              .Append('|').Append(c.IconRadiusRatio.ToString("F4", System.Globalization.CultureInfo.InvariantCulture))
+              .Append('|').Append(c.PanelStyle);
+
+            // 这三张表按内容参与签名：只比 Count 会在“换一张自定义图标”时漏判。
+            AppendSigList(sb, c.NoRound);
+            AppendSigList(sb, c.CustomIcons);
+            AppendSigList(sb, c.IconScales);
+
+            List<DockItem> list = IsLeft ? c.Left : c.Right;
+            if (list != null)
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    DockItem it = list[i];
+                    sb.Append('|').Append(it.Path).Append('~').Append(it.Name).Append('~').Append(it.IsEmpty);
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static void AppendSigList(StringBuilder sb, List<string> list)
+        {
+            sb.Append('#');
+            if (list == null) { return; }
+            for (int i = 0; i < list.Count; i++) { sb.Append('|').Append(list[i]); }
         }
 
         private void CloseIdleMenus()
