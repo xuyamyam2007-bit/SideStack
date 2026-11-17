@@ -177,6 +177,8 @@ namespace SideStack
             right.CustomIconCleared += delegate (DockWindow dw, DockItem it) { SetPair(cfg.CustomIcons, it, null); };
             left.IconScaleRequested += delegate (DockWindow dw, DockItem it, double s) { SetIconScale(it, s); };
             right.IconScaleRequested += delegate (DockWindow dw, DockItem it, double s) { SetIconScale(it, s); };
+            left.EmptySlotActivated += delegate (DockWindow dw, int idx) { AddAppsAt(dw, idx); };
+            right.EmptySlotActivated += delegate (DockWindow dw, int idx) { AddAppsAt(dw, idx); };
             left.Show();
             right.Show();
 
@@ -665,6 +667,24 @@ namespace SideStack
                 tray.ShowBalloon("SideStack", "侧边栏始终可以被截图/录屏/远程控制看到，无需再临时开启。");
             }
             catch (Exception ex) { Logger.Write("App.AllowCaptureForAWhile", ex); }
+        }
+
+        private void AddAppsAt(DockWindow dw, int index)
+        {
+            try
+            {
+                if (dw == null) { return; }
+                Microsoft.Win32.OpenFileDialog dlg = new Microsoft.Win32.OpenFileDialog();
+                dlg.Title = "添加到" + (dw.IsLeft ? "左" : "右") + "侧面板";
+                dlg.Filter = "程序与快捷方式|*.exe;*.lnk;*.url;*.appref-ms;*.bat;*.cmd|所有文件|*.*";
+                dlg.Multiselect = true;
+                dlg.CheckFileExists = true;
+                if (dlg.ShowDialog() != true) { return; }
+                string[] files = dlg.FileNames;
+                if (files == null || files.Length == 0) { return; }
+                AddDroppedFiles(dw, new System.Collections.Generic.List<string>(files), index);
+            }
+            catch (Exception ex) { Logger.Write("App.AddAppsAt", ex); }
         }
 
         private void AddDroppedFiles(DockWindow dw, System.Collections.Generic.List<string> paths, int index)

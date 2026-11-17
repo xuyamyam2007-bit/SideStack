@@ -1160,6 +1160,26 @@ namespace SideStack
             }
         }
 
+        public event Action<DockWindow, int> EmptySlotActivated;
+
+        private ContextMenu BuildEmptySlotMenu(int index)
+        {
+            ContextMenu menu = new ContextMenu();
+            MenuItem mi = new MenuItem();
+            mi.Header = "向这一侧添加应用…";
+            int at = index;
+            mi.Click += delegate
+            {
+                Action<DockWindow, int> h = EmptySlotActivated;
+                if (h == null) { return; }
+                try { h(this, at); }
+                catch (Exception ex) { Logger.Write("EmptySlotActivated", ex); }
+            };
+            menu.Items.Add(mi);
+            Theme.StyleMenu(menu);
+            return menu;
+        }
+
         private Border CreateItemBox(DockItem item, int index, List<DockItem> items,
             Color hoverBg, double hoverAlpha)
         {
@@ -1178,8 +1198,8 @@ namespace SideStack
                 b.BorderThickness = new Thickness(0);
                 b.Background = TransparentBrush;
                 b.Cursor = Cursors.Arrow;
-                b.ContextMenu = null;
-                b.ToolTip = null;
+                b.ToolTip = "空白位置：右键可把应用添加到这一格";
+                b.ContextMenu = BuildEmptySlotMenu(index);
                 return b;
             }
 
