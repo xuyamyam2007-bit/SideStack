@@ -56,7 +56,9 @@ namespace SideStack
             try { Icon = IconLoader.AppIcon(); } catch { }
             Width = 460;
             SizeToContent = SizeToContent.Height;
-            MaxHeight = 720;
+            // 高缩放到小屏（1366×768 @150%）时窗口会比工作区还高，
+            // 底部的「确定/取消」会被推到屏幕外且无法自救 —— 用工作区高度封顶，内容改为可滚动。
+            MaxHeight = Math.Min(720, SystemParameters.WorkArea.Height * 0.9);
             WindowStyle = WindowStyle.None;
             AllowsTransparency = true;
             Background = Brushes.Transparent;
@@ -147,15 +149,23 @@ namespace SideStack
 
             Grid shell = new Grid();
             shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            // 星号行：内容不超高时与 Auto 等效（窗口仍按内容自动高），
+            // 被 MaxHeight 封顶时则把剩余高度给 ScrollViewer，多出来的内容可以滚动看到。
+            shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             FrameworkElement bar = Theme.TitleBar(this, title, "", delegate { Result = null; Close(); });
             bar.Margin = new Thickness(Theme.PadWindow, Theme.PadContentTop, Theme.PadWindow, 8);
             Grid.SetRow(bar, 0);
             shell.Children.Add(bar);
             root.Margin = new Thickness(Theme.PadWindow, 2, Theme.PadWindow, Theme.PadWindowBottom);
-            Grid.SetRow(root, 1);
-            shell.Children.Add(root);
+
+            ScrollViewer sc = new ScrollViewer();
+            sc.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            sc.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            sc.CanContentScroll = false;
+            sc.Content = root;
+            Grid.SetRow(sc, 1);
+            shell.Children.Add(sc);
 
             Grid liquid = Theme.LiquidGlassShell(Theme.RadiusWindow, shell);
             liquid.Margin = new Thickness(16, 14, 16, 16);

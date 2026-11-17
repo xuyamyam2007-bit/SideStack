@@ -9,7 +9,23 @@ namespace SideStack
     // 轻量模态对话框：文本输入与确认。
     public static class Dialog
     {
-        public static string Prompt(string title, string message, string def)
+        // 有 owner 就在 owner 上居中并跟着它联动（多显示器下不会跑到主屏中间）；
+        // 没有 owner（例如托盘菜单弹出的）退回屏幕居中。
+        private static void Own(Window w, Window owner)
+        {
+            if (owner != null && !object.ReferenceEquals(owner, w) && owner.IsLoaded)
+            {
+                try
+                {
+                    w.Owner = owner;
+                    w.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                    return;
+                }
+                catch { }
+            }
+            w.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+        public static string Prompt(Window owner, string title, string message, string def)
         {
             string result = null;
             try
@@ -22,7 +38,7 @@ namespace SideStack
                 w.ShowInTaskbar = false;
                 w.Topmost = true;
                 w.SizeToContent = SizeToContent.WidthAndHeight;
-                w.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                Dialog.Own(w, owner);
                 w.FontFamily = new FontFamily("Microsoft YaHei UI, Microsoft YaHei, Segoe UI");
 
                 Border panel = Theme.GlassPanel(16, 0.97);
@@ -104,7 +120,7 @@ namespace SideStack
             return result;
         }
 
-        public static bool Confirm(string title, string message)
+        public static bool Confirm(Window owner, string title, string message)
         {
             bool ok = false;
             try
@@ -117,7 +133,7 @@ namespace SideStack
                 w.ShowInTaskbar = false;
                 w.Topmost = true;
                 w.SizeToContent = SizeToContent.WidthAndHeight;
-                w.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                Dialog.Own(w, owner);
                 w.FontFamily = new FontFamily("Microsoft YaHei UI, Microsoft YaHei, Segoe UI");
 
                 Border panel = Theme.GlassPanel(16, 0.97);

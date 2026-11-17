@@ -1659,7 +1659,7 @@ namespace SideStack
         {
             try
             {
-                string nm = Dialog.Prompt("修改图标名称", "显示名称（留空 = 用文件名）：", item.Name);
+                string nm = Dialog.Prompt(this, "修改图标名称", "显示名称（留空 = 用文件名）：", item.Name);
                 if (nm == null) { return; }
                 nm = nm.Trim();
                 if (nm.Length == 0)

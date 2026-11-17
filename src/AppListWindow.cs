@@ -287,7 +287,7 @@ namespace SideStack
             {
                 string now = (item.Name != null && item.Name.Length > 0)
                     ? item.Name : System.IO.Path.GetFileNameWithoutExtension(item.Path);
-                string nn = Dialog.Prompt("修改应用名称", "Dock 上显示的名称：", now);
+                string nn = Dialog.Prompt(this, "修改应用名称", "Dock 上显示的名称：", now);
                 if (nn == null) { return; }
                 nn = nn.Trim();
                 if (nn.Length == 0) { SetTip("名称不能为空，未做修改。"); return; }
@@ -325,7 +325,7 @@ namespace SideStack
         {
             string nm = item.IsEmpty ? "空白位置" : ((item.Name != null && item.Name.Length > 0)
                 ? item.Name : System.IO.Path.GetFileNameWithoutExtension(item.Path));
-            if (!Dialog.Confirm("从 Dock 列表移除", "确定把「" + nm + "」从 Dock 栏移出吗？\n（只影响 Dock 列表，不会删除磁盘上的程序文件）"))
+            if (!Dialog.Confirm(this, "从 Dock 列表移除", "确定把「" + nm + "」从 Dock 栏移出吗？\n（只影响 Dock 列表，不会删除磁盘上的程序文件）"))
             {
                 return;
             }

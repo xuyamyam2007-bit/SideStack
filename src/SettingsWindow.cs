@@ -399,7 +399,7 @@ namespace SideStack
             try
             {
                 DockConfig d = new DockConfig();
-                if (!Dialog.Confirm("恢复默认设置",
+                if (!Dialog.Confirm(this, "恢复默认设置",
                         "将把以下参数恢复为出厂默认值：\r\n\r\n" +
                         "  · 名称显示\r\n" +
                         "  · 图标大小 " + d.IconSize + " / 间距 " + d.IconSpacing + " / 内边距 " + d.IconPad +
@@ -974,7 +974,7 @@ namespace SideStack
         {
             try
             {
-                if (!Dialog.Confirm("退出 SideStack", "确定退出吗？"))
+                if (!Dialog.Confirm(this, "退出 SideStack", "确定退出吗？"))
                 {
                     return;
                 }
