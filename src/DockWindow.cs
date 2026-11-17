@@ -842,51 +842,56 @@ namespace SideStack
 
         private void LensLiveLoop(int gen)
         {
-            while (lensThreadRun && gen == lensGen)
+            HighResTimer.Acquire();
+            try
             {
-                int sleep = LensFrameMs;
-                try
+                while (lensThreadRun && gen == lensGen)
                 {
-                    if (cfg == null || !IsLensStyle(cfg.PanelStyle)) { break; }
-                    if (!wantShow && animT <= 0.001) { break; }
-
-                    if (LensFollowsAnimClock() && IsAnimating) { System.Threading.Thread.Sleep(2); continue; }
-
-                    if (lensPushPending) { System.Threading.Thread.Sleep(2); continue; }
-
-                    int w = ToPx(dockWidth), h = ToPx(dockHeight);
-                    if (w <= 0 || h <= 0 || lastPlacedWinX == int.MinValue || hwnd == IntPtr.Zero)
+                    int sleep = LensFrameMs;
+                    try
                     {
-                        System.Threading.Thread.Sleep(30);
-                        continue;
-                    }
+                        if (cfg == null || !IsLensStyle(cfg.PanelStyle)) { break; }
+                        if (!wantShow && animT <= 0.001) { break; }
 
-                    double edge = EdgePadDip();
-                    int x = lastPlacedWinX + ToPx(IsLeft ? ShadowPad : ShadowPad + edge);
-                    int y = lastPlacedWinY + ToPx(ShadowPad);
+                        if (LensFollowsAnimClock() && IsAnimating) { System.Threading.Thread.Sleep(2); continue; }
 
-                    DateTime t0 = DateTime.UtcNow;
-                    byte[] glass; int rw, rh;
-                    if (!RenderLensInto(x, y, w, h, lensCapturer, lensDst, ref lensDstSlot,
-                                        out glass, out rw, out rh))
-                    {
-                        int skip = (int)(DateTime.UtcNow - t0).TotalMilliseconds;
-                        sleep = LensFrameMs - skip;
+                        if (lensPushPending) { System.Threading.Thread.Sleep(2); continue; }
+
+                        int w = ToPx(dockWidth), h = ToPx(dockHeight);
+                        if (w <= 0 || h <= 0 || lastPlacedWinX == int.MinValue || hwnd == IntPtr.Zero)
+                        {
+                            System.Threading.Thread.Sleep(30);
+                            continue;
+                        }
+
+                        double edge = EdgePadDip();
+                        int x = lastPlacedWinX + ToPx(IsLeft ? ShadowPad : ShadowPad + edge);
+                        int y = lastPlacedWinY + ToPx(ShadowPad);
+
+                        DateTime t0 = DateTime.UtcNow;
+                        byte[] glass; int rw, rh;
+                        if (!RenderLensInto(x, y, w, h, lensCapturer, lensDst, ref lensDstSlot,
+                                            out glass, out rw, out rh))
+                        {
+                            int skip = (int)(DateTime.UtcNow - t0).TotalMilliseconds;
+                            sleep = LensFrameMs - skip;
+                            if (sleep < 1) { sleep = 1; }
+                            continue;
+                        }
+
+                        lensPushPending = true;
+                        Dispatcher.BeginInvoke(new Action(delegate { PushLensFrame(glass, rw, rh, 0, false); }));
+
+                        int elapsed = (int)(DateTime.UtcNow - t0).TotalMilliseconds;
+                        sleep = LensFrameMs - elapsed;
                         if (sleep < 1) { sleep = 1; }
-                        continue;
                     }
-
-                    lensPushPending = true;
-                    Dispatcher.BeginInvoke(new Action(delegate { PushLensFrame(glass, rw, rh, 0, false); }));
-
-                    int elapsed = (int)(DateTime.UtcNow - t0).TotalMilliseconds;
-                    sleep = LensFrameMs - elapsed;
-                    if (sleep < 1) { sleep = 1; }
+                    catch (Exception ex) { Logger.Write("LensLiveLoop", ex); sleep = 200; }
+                    try { System.Threading.Thread.Sleep(sleep); } catch { }
                 }
-                catch (Exception ex) { Logger.Write("LensLiveLoop", ex); sleep = 200; }
-                try { System.Threading.Thread.Sleep(sleep); } catch { }
+                if (gen == lensGen) { lensThreadRun = false; }
             }
-            if (gen == lensGen) { lensThreadRun = false; }
+            finally { HighResTimer.Release(); }
         }
 
         private int perfFrames, perfCapSum, perfRenderSum, perfRenderCount, perfPushSum, perfPushCount;

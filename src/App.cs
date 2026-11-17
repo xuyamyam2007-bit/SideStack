@@ -186,8 +186,6 @@ namespace SideStack
             timer.Interval = TimeSpan.FromMilliseconds(16);
             timer.Tick += OnTick;
 
-            HighResTimer.Require(true);
-
             InitAnimFps();
 
             HookLayout();
@@ -1112,37 +1110,42 @@ namespace SideStack
 
         private void AnimLoop()
         {
+            HighResTimer.Acquire();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             double next = 0;
-            while (animThreadRun)
+            try
             {
-                double period = animThreadPeriodUs / 1000.0;
-                next += period;
-                double wait = next - sw.Elapsed.TotalMilliseconds;
-                if (wait < -period)
+                while (animThreadRun)
                 {
-                    next = sw.Elapsed.TotalMilliseconds + period;
-                    wait = period;
-                }
-                try
-                {
-                    if (wait > 2.5) { System.Threading.Thread.Sleep((int)(wait - 2.0)); }
-                    while (animThreadRun && sw.Elapsed.TotalMilliseconds < next - 0.15)
+                    double period = animThreadPeriodUs / 1000.0;
+                    next += period;
+                    double wait = next - sw.Elapsed.TotalMilliseconds;
+                    if (wait < -period)
                     {
-                        System.Threading.Thread.SpinWait(120);
+                        next = sw.Elapsed.TotalMilliseconds + period;
+                        wait = period;
                     }
+                    try
+                    {
+                        if (wait > 2.5) { System.Threading.Thread.Sleep((int)(wait - 2.0)); }
+                        while (animThreadRun && sw.Elapsed.TotalMilliseconds < next - 0.15)
+                        {
+                            System.Threading.Thread.SpinWait(120);
+                        }
+                    }
+                    catch { break; }
+                    if (!animThreadRun) { break; }
+                    if (animTickPending) { continue; }
+                    animTickPending = true;
+                    try
+                    {
+                        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render,
+                            new Action(AnimPump));
+                    }
+                    catch (Exception ex) { animTickPending = false; Logger.Write("动画帧投递失败", ex); break; }
                 }
-                catch { break; }
-                if (!animThreadRun) { break; }
-                if (animTickPending) { continue; }
-                animTickPending = true;
-                try
-                {
-                    Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render,
-                        new Action(AnimPump));
-                }
-                catch (Exception ex) { animTickPending = false; Logger.Write("动画帧投递失败", ex); break; }
             }
+            finally { HighResTimer.Release(); }
         }
 
         private void AnimPump()
@@ -1214,8 +1217,6 @@ namespace SideStack
                 timer.Interval = TimeSpan.FromMilliseconds(want);
                 Logger.Write("心跳定时器 -> " + (int)want + " ms（" + (dockSuspended ? "面板已挂起" : "面板活动") + "）");
             }
-
-            HighResTimer.Require(!dockSuspended);
         }
     }
 }
