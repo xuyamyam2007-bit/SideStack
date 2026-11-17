@@ -89,6 +89,7 @@ namespace SideStack
         private string lensKey = "";
         private bool lensBusy;
         private bool lensPending;
+        private long lensBusyAt;
 
         private WriteableBitmap lensWb;
         private System.Threading.Thread lensThread;
@@ -1000,7 +1001,15 @@ namespace SideStack
                 if (ItemCount == 0) { return; }
                 if (suspended) { return; }
                 if (double.IsNaN(Width) || double.IsNaN(Height)) { return; }
-                if (lensBusy) { lensPending = true; return; }
+                if (lensBusy)
+                {
+                    // 唯一的复位点是 ApplyLensBitmap 的回调。Dispatcher 已关闭或渲染线程
+                    // 抛异常时那个回调永不执行，这里用看门狗兜底，避免底图永久停更。
+                    if (Clock.NowMs() - lensBusyAt < 3000) { lensPending = true; return; }
+                    Logger.Write("光感：上一次渲染未回填（超时 3s），重置忙标志");
+                    lensBusy = false;
+                    lensPending = false;
+                }
                 if (!force && animT > 0.001) { return; }
 
                 RECT mon = ScreenUtils.GetPrimaryMonitorPx();
@@ -1024,6 +1033,7 @@ namespace SideStack
                 if (src == null) { return; }
 
                 lensBusy = true;
+                lensBusyAt = Clock.NowMs();
 
                 int usePct = lensScalePct;
                 double scale = dpiScale * usePct / 100.0;
@@ -1040,7 +1050,12 @@ namespace SideStack
                     }
                     catch (Exception ex) { Logger.Write("LensGlass.Render", ex); }
                     int ms = (int)(DateTime.UtcNow - t0).TotalMilliseconds;
-                    Dispatcher.BeginInvoke(new Action(delegate { ApplyLensBitmap(glass, pw, ph, ms); }));
+                    if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { return; }
+                    try
+                    {
+                        Dispatcher.BeginInvoke(new Action(delegate { ApplyLensBitmap(glass, pw, ph, ms); }));
+                    }
+                    catch (Exception ex) { Logger.Write("LensBackdrop.BeginInvoke", ex); }
                 });
             }
             catch (Exception ex) { Logger.Write("UpdateLensBackdrop", ex); }

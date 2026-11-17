@@ -144,17 +144,30 @@ namespace SideStack
             {
                 using (Process p = Process.Start(psi))
                 {
-                    string so = p.StandardOutput.ReadToEnd();
-                    string se = p.StandardError.ReadToEnd();
-                    if (!p.WaitForExit(CompileTimeoutMs))
+                    // stdout / stderr 必须并发读，否则任一管道写满就会互相等待，
+                    // WaitForExit(180s) 永远走不到，编译看起来“卡死”。
+                    string[] so = new string[1];
+                    string[] se = new string[1];
+                    System.Threading.Thread tOut = new System.Threading.Thread(delegate () { so[0] = p.StandardOutput.ReadToEnd(); });
+                    System.Threading.Thread tErr = new System.Threading.Thread(delegate () { se[0] = p.StandardError.ReadToEnd(); });
+                    tOut.IsBackground = true;
+                    tErr.IsBackground = true;
+                    tOut.Start();
+                    tErr.Start();
+
+                    bool done = p.WaitForExit(CompileTimeoutMs);
+                    if (!done)
                     {
                         try { p.Kill(); } catch { }
                         err = "编译超时（超过 " + (CompileTimeoutMs / 1000) + " 秒）。";
                         return false;
                     }
+                    tOut.Join(3000);
+                    tErr.Join(3000);
+
                     if (p.ExitCode != 0 || !File.Exists(outExe))
                     {
-                        string msg = (so + "\r\n" + se).Trim();
+                        string msg = ((so[0] ?? "") + "\r\n" + (se[0] ?? "")).Trim();
                         if (msg.Length > MaxErrorChars) { msg = msg.Substring(0, MaxErrorChars) + "\r\n...(错误信息过长已截断)"; }
                         if (msg.Length == 0) { msg = "编译器返回码 " + p.ExitCode + "，且未生成输出文件。"; }
                         err = msg;

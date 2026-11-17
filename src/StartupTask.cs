@@ -397,12 +397,31 @@ namespace SideStack
 
             using (Process p = Process.Start(psi))
             {
-                byte[] rawOut = ReadAll(p.StandardOutput.BaseStream);
-                string se = p.StandardError.ReadToEnd();
-                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } exitCode = -1; return DecodeText(rawOut) + se; }
+                // stdout / stderr 必须并发读：先读完 stdout 再读 stderr 会在任一侧写满管道时
+                // 互相等待，WaitForExit(timeoutMs) 也就永远等不到。
+                byte[][] so = new byte[1][];
+                byte[][] se = new byte[1][];
+                System.Threading.Thread tOut = new System.Threading.Thread(delegate () { so[0] = ReadAll(p.StandardOutput.BaseStream); });
+                System.Threading.Thread tErr = new System.Threading.Thread(delegate () { se[0] = ReadAll(p.StandardError.BaseStream); });
+                tOut.IsBackground = true;
+                tErr.IsBackground = true;
+                tOut.Start();
+                tErr.Start();
+
+                if (!p.WaitForExit(timeoutMs))
+                {
+                    try { p.Kill(); } catch { }
+                    Logger.Write("子进程超时已终止: " + exe);
+                    tOut.Join(2000);
+                    tErr.Join(2000);
+                    exitCode = -1;
+                    return DecodeText(so[0]) + DecodeText(se[0]);
+                }
+                tOut.Join(2000);
+                tErr.Join(2000);
                 exitCode = p.ExitCode;
-                sb.Append(DecodeText(rawOut));
-                if (!string.IsNullOrEmpty(se)) { sb.Append(se); }
+                sb.Append(DecodeText(so[0]));
+                sb.Append(DecodeText(se[0]));
             }
             return sb.ToString();
         }

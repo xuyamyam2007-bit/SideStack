@@ -335,7 +335,10 @@ namespace SideStack
 
         public static byte[] CaptureBgraClamped(int x, int y, int w, int h)
         {
-            return SharedCapturer.Capture(x, y, w, h);
+            // SharedCapturer 复用同一块缓冲，只在 BitBlt 期间持锁。调用方拿到后通常会
+            // 交给后台线程逐像素渲染，期间共享缓冲可能被下一次抓屏覆盖 —— 在唯一出口拷贝一份。
+            byte[] b = SharedCapturer.Capture(x, y, w, h);
+            return b == null ? null : (byte[])b.Clone();
         }
 
         private static readonly ScreenBgraCapturer SharedCapturer = new ScreenBgraCapturer();
