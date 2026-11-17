@@ -62,15 +62,18 @@ namespace SideStack
                 Type t = Type.GetTypeFromProgID("WScript.Shell");
                 if (t == null) { return null; }
                 object shell = Activator.CreateInstance(t);
+                object sc = null;
                 try
                 {
-                    object sc = t.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
+                    sc = t.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
                     if (sc == null) { return null; }
                     object target = sc.GetType().InvokeMember("TargetPath", System.Reflection.BindingFlags.GetProperty, null, sc, null);
                     return target as string;
                 }
                 finally
                 {
+                    // CreateShortcut 返回的 WScript.Shell 子对象也要释放，否则反复解析快捷方式会把 COM 对象攒住。
+                    if (sc != null && Marshal.IsComObject(sc)) { Marshal.ReleaseComObject(sc); }
                     if (shell != null && Marshal.IsComObject(shell)) { Marshal.ReleaseComObject(shell); }
                 }
             }

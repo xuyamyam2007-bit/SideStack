@@ -16,18 +16,19 @@ namespace SideStack
 
         public event Action RecheckRequested;
 
-        public event Action CaptureRequested;
-
         private WinForms.NotifyIcon notify;
         private WinForms.ToolStripMenuItem miToggle;
+        private bool trayIconOwned;
         private bool disposed;
 
         public TrayIcon()
         {
             notify = new WinForms.NotifyIcon();
 
-            Icon ico = LoadIcon();
+            bool iconOwned;
+            Icon ico = LoadIcon(out iconOwned);
             if (ico != null) { notify.Icon = ico; }
+            trayIconOwned = iconOwned;
             notify.Text = "SideStack";
             notify.Visible = true;
 
@@ -51,10 +52,6 @@ namespace SideStack
             WinForms.ToolStripMenuItem miRecheck = new WinForms.ToolStripMenuItem("重新检测并唤出面板");
             miRecheck.Click += delegate { Raise(RecheckRequested); };
             menu.Items.Add(miRecheck);
-
-            WinForms.ToolStripMenuItem miCapture = new WinForms.ToolStripMenuItem("允许截图侧边栏（60 秒）");
-            miCapture.Click += delegate { Raise(CaptureRequested); };
-            menu.Items.Add(miCapture);
 
             WinForms.ToolStripMenuItem miConfig = new WinForms.ToolStripMenuItem("打开配置目录");
             miConfig.Click += delegate { Raise(OpenConfigFolderRequested); };
@@ -83,19 +80,20 @@ namespace SideStack
             catch { }
         }
 
-        private static Icon LoadIcon()
+        private static Icon LoadIcon(out bool owned)
         {
+            owned = false;
             try
             {
                 string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 if (!string.IsNullOrEmpty(dir))
                 {
                     string ico = Path.Combine(dir, "app.ico");
-                    if (File.Exists(ico)) { return new Icon(ico, new Size(32, 32)); }
+                    if (File.Exists(ico)) { owned = true; return new Icon(ico, new Size(32, 32)); }
                 }
             }
             catch { }
-            try { return Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location); }
+            try { Icon e = Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location); if (e != null) { owned = true; } return e; }
             catch { }
             try { return SystemIcons.Application; }
             catch { }
@@ -118,6 +116,9 @@ namespace SideStack
                 if (notify != null)
                 {
                     notify.Visible = false;
+                    // 自己从 app.ico / exe 资源里 new 出来的 Icon 要释放；SystemIcons.Application 是共享静态对象，不能动。
+                    if (trayIconOwned && notify.Icon != null) { notify.Icon.Dispose(); }
+                    notify.Icon = null;
                     notify.Dispose();
                     notify = null;
                 }

@@ -72,7 +72,9 @@ namespace SideStack
                 }
                 if (Directory.GetFiles(legacy, "*", SearchOption.AllDirectories).Length == 0)
                 {
-                    Directory.Delete(legacy, true);
+                    // 删不掉旧目录不影响使用（可能被杀软/索引占用），但不能静默吞掉，否则用户以为迁移没生效。
+                    try { Directory.Delete(legacy, true); }
+                    catch (Exception ex) { Logger.Write("MigrateLegacyData: 旧目录删除失败 " + legacy, ex); }
                 }
             }
             catch { }
@@ -96,27 +98,33 @@ namespace SideStack
             }
 
             bool created;
-            Mutex mutex = new Mutex(true, "SideStack_SingleInstance_Mutex_7C41", out created);
-            if (!created)
+            using (Mutex mutex = new Mutex(true, "SideStack_SingleInstance_Mutex_7C41", out created))
             {
-                MessageBox.Show("SideStack 已经在运行了。", "SideStack",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
+                if (!created)
+                {
+                    MessageBox.Show("SideStack 已经在运行了。", "SideStack",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
 
-            DockApp app = new DockApp();
-            try
-            {
-                app.Run();
-            }
-            catch (Exception ex)
-            {
-                Logger.Write("Main", ex);
-                MessageBox.Show(ex.ToString(), "SideStack 运行异常");
-            }
-            finally
-            {
-                GC.KeepAlive(mutex);
+                try
+                {
+                    DockApp app = new DockApp();
+                    try
+                    {
+                        app.Run();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Write("Main", ex);
+                        MessageBox.Show(ex.ToString(), "SideStack 运行异常");
+                    }
+                }
+                finally
+                {
+                    try { mutex.ReleaseMutex(); }
+                    catch (Exception ex) { Logger.Write("Main: 释放单实例互斥量失败", ex); }
+                }
             }
         }
 
@@ -238,8 +246,6 @@ namespace SideStack
                 tray.ExitRequested += delegate { Quit(); };
 
                 tray.RecheckRequested += delegate { ForceRecheckDesktop(); };
-
-                tray.CaptureRequested += delegate { AllowCaptureForAWhile(); };
 
                 Logger.Write("抓屏可见性: 允许（远程控制/录屏/截图都能看到侧边栏）");
 
@@ -610,8 +616,9 @@ namespace SideStack
             int found = -1;
             for (int i = 0; i < list.Count; i++)
             {
-                int j = list[i].IndexOf('|');
-                if (j > 0 && string.Equals(list[i].Substring(0, j), it.Path, StringComparison.OrdinalIgnoreCase)) { found = i; break; }
+                string p, v;
+                if (ConfigStore.SplitPair(list[i], out p, out v)
+                    && string.Equals(p, it.Path, StringComparison.OrdinalIgnoreCase)) { found = i; break; }
             }
             if (value == null)
             {
@@ -658,15 +665,6 @@ namespace SideStack
                 Logger.Write("应用身份已注册: " + AppUserModelId + "，通知图标 = " + ico);
             }
             catch (Exception ex) { Logger.Write("RegisterAppIdentity", ex); }
-        }
-
-        private void AllowCaptureForAWhile()
-        {
-            try
-            {
-                tray.ShowBalloon("SideStack", "侧边栏始终可以被截图/录屏/远程控制看到，无需再临时开启。");
-            }
-            catch (Exception ex) { Logger.Write("App.AllowCaptureForAWhile", ex); }
         }
 
         private void AddAppsAt(DockWindow dw, int index)

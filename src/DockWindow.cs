@@ -58,8 +58,6 @@ namespace SideStack
 
         private const double ShadowPad = 16;
 
-        private const double EdgePadScale = 0.45;
-
         private const double EdgePadMin = 1.0;
 
         private const double PeekW = 4;
@@ -276,6 +274,10 @@ namespace SideStack
                 NativeMethods.SetWindowLongPtr(h, NativeMethods.GWL_EXSTYLE, new IntPtr(v));
                 UpdateDpi();
 
+                // 记住当前显示器/工作区矩形：首次 ApplyPosition 不该被当成「屏幕变了」而重复强制重放。
+                lastMonRect = ScreenUtils.GetPrimaryMonitorPx();
+                lastWorkRect = ScreenUtils.GetPrimaryWorkPx();
+
                 HwndSource src = HwndSource.FromHwnd(h);
                 if (src != null) { src.AddHook(OnHwndMessage); }
             }
@@ -295,9 +297,8 @@ namespace SideStack
             InvalidateWindowOffset();
             IconLoader.Clear();
             RebuildItems();
-            Relayout();
             forcePlacePending = true;
-            ApplyPosition();
+            Relayout();
         }
 
         private IntPtr OnHwndMessage(IntPtr hwndMsg, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -377,9 +378,10 @@ namespace SideStack
                 }
 
                 InvalidateWindowOffset();
-                Relayout();
+                // Relayout() 末尾会调用 ApplyPosition()，这里先把强制重放标志立起来，
+                // 让那一次计算就按新尺寸落位（不必再算第二遍坐标）。
                 forcePlacePending = true;
-                ApplyPosition();
+                Relayout();
 
                 screenRefreshLeft--;
                 if (screenRefreshLeft > 0 && screenTimer != null)
@@ -451,7 +453,6 @@ namespace SideStack
             Content = host;
 
             panelMenu = BuildPanelMenu();
-            WindowCapture.Guard(panelMenu);
             Theme.StyleMenu(panelMenu);
             panel.ContextMenu = panelMenu;
 
@@ -673,7 +674,9 @@ namespace SideStack
         {
             try
             {
-                if (on && WindowCapture.LensSelfExcludeDisabled) { on = false; }
+                // 光感面板要抓屏取背景，必须把自己排除出抓屏，否则会抓到自己形成自反馈。
+                // 调试时可用 SIDESTACK_CAPTURABLE=1 关掉这个排除（届时玻璃背景会自反馈）。
+                if (on && string.Equals(Environment.GetEnvironmentVariable("SIDESTACK_CAPTURABLE"), "1", StringComparison.Ordinal)) { on = false; }
                 if (hwnd == IntPtr.Zero || lensAffinity == on) { return; }
                 uint v = on ? NativeMethods.WDA_EXCLUDEFROMCAPTURE : NativeMethods.WDA_NONE;
                 bool ok = NativeMethods.SetWindowDisplayAffinity(hwnd, v);
@@ -1071,32 +1074,6 @@ namespace SideStack
             catch (Exception ex) { Logger.Write("UpdateLensBackdrop", ex); }
         }
 
-        private byte[] CaptureBackdropQuiet(int monL, int monR, int workT,
-                                            int left, int top, int w, int h)
-        {
-            int savedX = lastPlacedWinX, savedY = lastPlacedWinY;
-            try
-            {
-                if (hwnd != IntPtr.Zero)
-                {
-                    int awayX = IsLeft ? (monL - w - 64) : (monR + 64);
-                    NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, awayX, workT, 0, 0,
-                        NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
-                    NativeMethods.DwmFlush();
-                }
-                return ScreenUtils.CaptureBgra(left, top, w, h);
-            }
-            catch (Exception ex) { Logger.Write("CaptureBackdropQuiet", ex); return null; }
-            finally
-            {
-                if (hwnd != IntPtr.Zero && savedX != int.MinValue)
-                {
-                    NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, savedX, savedY, 0, 0,
-                        NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
-                }
-            }
-        }
-
         public void RequestLensRefresh(int delayMs)
         {
             try
@@ -1292,7 +1269,6 @@ namespace SideStack
 
             b.ContextMenu = BuildItemMenu(item, index, items);
             Theme.StyleMenu(b.ContextMenu);
-            WindowCapture.Guard(b.ContextMenu);
             if (cfg.NameMode == "hover")
             {
                 ToolTip tt = new ToolTip();
@@ -1475,11 +1451,11 @@ namespace SideStack
             if (cfg == null || cfg.CustomIcons == null || it == null || string.IsNullOrEmpty(it.Path)) { return null; }
             for (int i = 0; i < cfg.CustomIcons.Count; i++)
             {
-                string s = cfg.CustomIcons[i];
-                int j = s.IndexOf('|');
-                if (j > 0 && string.Equals(s.Substring(0, j), it.Path, StringComparison.OrdinalIgnoreCase))
+                string p, v;
+                if (ConfigStore.SplitPair(cfg.CustomIcons[i], out p, out v)
+                    && string.Equals(p, it.Path, StringComparison.OrdinalIgnoreCase))
                 {
-                    return s.Substring(j + 1);
+                    return v;
                 }
             }
             return null;
@@ -1490,12 +1466,11 @@ namespace SideStack
             if (cfg == null || cfg.IconScales == null || it == null || string.IsNullOrEmpty(it.Path)) { return 1.0; }
             for (int i = 0; i < cfg.IconScales.Count; i++)
             {
-                string s = cfg.IconScales[i];
-                int j = s.IndexOf('|');
-                if (j <= 0) { continue; }
-                if (!string.Equals(s.Substring(0, j), it.Path, StringComparison.OrdinalIgnoreCase)) { continue; }
+                string p, v0;
+                if (!ConfigStore.SplitPair(cfg.IconScales[i], out p, out v0)) { continue; }
+                if (!string.Equals(p, it.Path, StringComparison.OrdinalIgnoreCase)) { continue; }
                 double v;
-                if (double.TryParse(s.Substring(j + 1), System.Globalization.NumberStyles.Float,
+                if (double.TryParse(v0, System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out v))
                 {
                     return Math.Max(0.6, Math.Min(1.4, v));
@@ -1613,7 +1588,6 @@ namespace SideStack
             MenuItem miScale = new MenuItem();
             miScale.Header = "图标缩放";
 
-            WindowCapture.Guard(miScale);
             miScale.BorderBrush = new SolidColorBrush(Theme.Line);
             double cur = ScaleOf(item);
             double[] opts = new double[] { 0.7, 0.85, 1.0, 1.15, 1.3 };
@@ -1806,16 +1780,10 @@ namespace SideStack
 
                 double cellH = Math.Ceiling(slotH);
                 double availRows = availContentH - chrome;
-                double rowStep = cellH + spacing;
-                int maxRows = (rowStep > 0.0001)
-                    ? (int)Math.Floor((availRows + spacing) / rowStep)
-                    : n;
-                if (maxRows < 1) { maxRows = 1; }
-                int fitRows = Math.Min(Math.Max(1, n), maxRows);
 
                 double cellW0 = Math.Ceiling(slotW);
                 bool heightLimited;
-                int[] g = DockConfig.GridFor(n, slotW, slotH, spacing, availRows, out heightLimited);
+                int[] g = DockConfig.GridFor(n, slotH, spacing, availRows, out heightLimited);
                 cols = g[0];
                 rows = g[1];
 
@@ -1824,14 +1792,8 @@ namespace SideStack
                 panelH = needH;
                 panelW = needW;
 
-                bool narrowerBetter = false;
-                if (needW > maxPanelW && fitRows > 1)
-                {
-                    double wWith = chrome + Math.Ceiling((double)n / (fitRows - 1)) * cellW0
-                                   + ((Math.Ceiling((double)n / (fitRows - 1)) > 1) ? (Math.Ceiling((double)n / (fitRows - 1)) - 1) * spacing : 0);
-                    narrowerBetter = (wWith <= maxPanelW);
-                }
-
+                // 宽度/高度超预算时按比例整体缩小图标，直到放得下或缩到下限（0.45）为止。
+                // 兜底：预算比内边距还小时算不出有效比例（kw <= 0），此时直接再缩一档继续下一轮。
                 if (needW <= maxPanelW && needH <= maxPanelH + 0.01) { break; }
                 if (scale <= 0.45) { break; }
                 double kw = (needW > maxPanelW)
@@ -1840,7 +1802,7 @@ namespace SideStack
                 double kh = (needH > maxPanelH)
                     ? ((maxPanelH - chrome) / Math.Max(1.0, needH - chrome))
                     : 1.0;
-                if (double.IsNaN(kw) || kw <= 0) { kw = narrowerBetter ? 1.0 : 0.9; }
+                if (double.IsNaN(kw) || kw <= 0) { kw = 0.9; }
                 if (double.IsNaN(kh) || kh <= 0) { kh = 0.9; }
                 scale *= Math.Max(0.45 / scale, Math.Min(0.98, Math.Min(kw, kh)));
             }
@@ -1899,6 +1861,8 @@ namespace SideStack
             UpdateLensBackdrop(false);
         }
 
+        // 收起/展开时面板与屏幕边缘之间保留的最小间隙。历史上按比例算过，现在固定用最小值；
+        // 保留这个方法是因为调用点较多，且以后若要按 DPI/面板大小再调，只改这里即可。
         private double EdgePadDip()
         {
             return EdgePadMin;

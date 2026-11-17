@@ -157,12 +157,12 @@ namespace SideStack
             return img;
         }
 
-        private static ImageSource Load(string path, bool skipRound)
+        private static ImageSource Load(string path, bool keepSquare)
         {
-            ImageSource img = FromImageList(path, NativeMethods.SHIL_JUMBO, skipRound);
+            ImageSource img = FromImageList(path, NativeMethods.SHIL_JUMBO, keepSquare);
             if (img != null) { return img; }
 
-            img = FromImageList(path, NativeMethods.SHIL_EXTRALARGE, skipRound);
+            img = FromImageList(path, NativeMethods.SHIL_EXTRALARGE, keepSquare);
             if (img != null) { return img; }
 
             try
@@ -172,7 +172,7 @@ namespace SideStack
                 {
                     using (ic)
                     {
-                        return FromHIcon(ic.Handle, skipRound);
+                        return FromHIcon(ic.Handle, keepSquare);
                     }
                 }
             }
@@ -181,7 +181,7 @@ namespace SideStack
             return null;
         }
 
-        private static ImageSource FromImageList(string path, int listSize, bool skipRound)
+        private static ImageSource FromImageList(string path, int listSize, bool keepSquare)
         {
             try
             {
@@ -208,7 +208,7 @@ namespace SideStack
                 hr = list.GetIcon(index, 1, out hicon);
                 if (hr != 0 || hicon == IntPtr.Zero) { return null; }
 
-                try { return FromHIcon(hicon, skipRound); }
+                try { return FromHIcon(hicon, keepSquare); }
                 finally { NativeMethods.DestroyIcon(hicon); }
             }
             catch (Exception ex)
@@ -218,17 +218,17 @@ namespace SideStack
             }
         }
 
-        private static ImageSource FromHIcon(IntPtr hicon, bool skipRound)
+        private static ImageSource FromHIcon(IntPtr hicon, bool keepSquare)
         {
             BitmapSource bs = Imaging.CreateBitmapSourceFromHIcon(
                 hicon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-            return Finish(bs, skipRound);
+            return Finish(bs, keepSquare);
         }
 
-        private static ImageSource Finish(BitmapSource src, bool skipRound)
+        private static ImageSource Finish(BitmapSource src, bool keepSquare)
         {
             ImageSource trimmed = TrimTransparent(src);
-            ImageSource rounded = skipRound ? trimmed : RoundCorners(trimmed);
+            ImageSource rounded = keepSquare ? trimmed : RoundCorners(trimmed);
             rounded.Freeze();
             return rounded;
         }

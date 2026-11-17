@@ -77,7 +77,6 @@ namespace SideStack
                 tt.Background = Brushes.Transparent;
                 tt.HasDropShadow = false;
                 tt.Template = RoundPopupTemplate(typeof(ToolTip), 9, 10, 6, 10, 6, false);
-                WindowCapture.Guard(tt);
             }
             catch { }
         }

@@ -60,7 +60,6 @@ namespace SideStack
 
         public double SettingsOpacity = 0.88;
 
-        public bool UiRefraction = false;
         public double TriggerWidth = 4;
 
         public double PeekWidth = 4;
@@ -68,7 +67,13 @@ namespace SideStack
         public int AnimMs = 800;
         public int CollapseDelayMs = 320;
         public bool AutoStart = false;
-        public bool ShowToolTip = true;
+
+        // 名称提示是否显示由「名称显示」派生：off 时悬停提示没有意义。
+        // 旧配置里的 behavior.showtooltip 仍会被读取，仅用于推导 NameMode。
+        public bool ShowToolTip
+        {
+            get { return !string.Equals(NameMode, "off", StringComparison.Ordinal); }
+        }
 
         public bool HideDesktopIcons = false;
 
@@ -109,13 +114,13 @@ namespace SideStack
         public List<DockItem> Left = new List<DockItem>();
         public List<DockItem> Right = new List<DockItem>();
 
-        public static int[] GridFor(int slots, double slotW, double slotH, double spacing, double availContentH)
+        public static int[] GridFor(int slots, double slotH, double spacing, double availContentH)
         {
             bool heightLimited;
-            return GridFor(slots, slotW, slotH, spacing, availContentH, out heightLimited);
+            return GridFor(slots, slotH, spacing, availContentH, out heightLimited);
         }
 
-        public static int[] GridFor(int slots, double slotW, double slotH, double spacing,
+        public static int[] GridFor(int slots, double slotH, double spacing,
             double availContentH, out bool heightLimited)
         {
             heightLimited = false;
@@ -142,9 +147,9 @@ namespace SideStack
             HoverColor = s.HoverColor; HoverOpacity = s.HoverOpacity;
             HoverBorderColor = s.HoverBorderColor; HoverBorderWidth = s.HoverBorderWidth;
             IconRadiusRatio = s.IconRadiusRatio; SettingsOpacity = s.SettingsOpacity;
-            UiRefraction = s.UiRefraction; TriggerWidth = s.TriggerWidth; PeekWidth = s.PeekWidth;
+            TriggerWidth = s.TriggerWidth; PeekWidth = s.PeekWidth;
             AnimMs = s.AnimMs; CollapseDelayMs = s.CollapseDelayMs; AutoStart = s.AutoStart;
-            ShowToolTip = s.ShowToolTip; HideDesktopIcons = s.HideDesktopIcons;
+            HideDesktopIcons = s.HideDesktopIcons;
             AnimFps = s.AnimFps; Easing = s.Easing; DragReorder = s.DragReorder;
 
             Ignored.Clear(); Ignored.AddRange(s.Ignored);
@@ -186,6 +191,14 @@ namespace SideStack
             AnimMs = d.AnimMs;
             CollapseDelayMs = d.CollapseDelayMs;
             AnimFps = d.AnimFps;
+
+            // 选择性质的设置也回默认值；这些是用户能一眼看出来的「风格」，不跟着恢复会让人以为没生效。
+            PanelStyle = d.PanelStyle;
+            NameMode = d.NameMode;
+            HoverColor = d.HoverColor;
+            HoverBorderColor = d.HoverBorderColor;
+            Easing = d.Easing;
+            DragReorder = d.DragReorder;
         }
     }
 }

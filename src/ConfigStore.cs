@@ -57,7 +57,6 @@ namespace SideStack
         private const string K_TRIGGER = "behavior.triggerwidth";
         private const string K_PEEK = "behavior.peekwidth";
         private const string K_UI_OPACITY = "ui.settingsopacity";
-        private const string K_UI_REFRACT = "ui.refraction";
         private const string K_ANIM = "behavior.animms";
         private const string K_COLLAPSE_DELAY = "behavior.collapsedelayms";
         private const string K_AUTOSTART = "behavior.autostart";
@@ -78,16 +77,15 @@ namespace SideStack
 
         private static void AddPair(List<string> list, string v)
         {
-            if (list == null || string.IsNullOrEmpty(v)) { return; }
-            int i = v.IndexOf('|');
-            if (i <= 0 || i >= v.Length - 1) { return; }
-            string key = v.Substring(0, i).Trim();
-            string val = v.Substring(i + 1).Trim();
-            if (key.Length == 0 || val.Length == 0) { return; }
+            if (list == null) { return; }
+            string key, val;
+            if (!SplitPair(v, out key, out val)) { return; }
+            if (val.Length == 0) { return; }
             for (int k = 0; k < list.Count; k++)
             {
-                int j = list[k].IndexOf('|');
-                if (j > 0 && string.Equals(list[k].Substring(0, j), key, StringComparison.OrdinalIgnoreCase))
+                string oldKey, oldVal;
+                if (SplitPair(list[k], out oldKey, out oldVal)
+                    && string.Equals(oldKey, key, StringComparison.OrdinalIgnoreCase))
                 {
                     list[k] = key + "|" + val;
                     return;
@@ -108,6 +106,8 @@ namespace SideStack
             List<DockItem> left = new List<DockItem>();
             List<DockItem> right = new List<DockItem>();
             bool nameModeExplicit = false;
+            // 旧配置（1.0.3 及以前）用 behavior.showtooltip 控制名称提示，现在只用来推导 NameMode。
+            bool legacyTooltip = true;
 
             try
             {
@@ -129,21 +129,20 @@ namespace SideStack
                     else if (k == K_ICON_PAD) { c.IconPad = D(v, c.IconPad); }
                     else if (k == K_ICON_RADIUS) { c.IconRadiusRatio = D(v, c.IconRadiusRatio); }
                     else if (k == K_PANEL_STYLE) { c.PanelStyle = v; }
-            else if (k == K_LENS_SCALE) { double d; if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out d)) { c.LensScale = d; } }
-            else if (k == K_EASING) { c.Easing = v; }
+                    else if (k == K_LENS_SCALE) { c.LensScale = D(v, c.LensScale); }
+                    else if (k == K_EASING) { c.Easing = v; }
                     else if (k == K_NAME_MODE) { c.NameMode = v; nameModeExplicit = true; }
                     else if (k == K_HOVER_COLOR) { c.HoverColor = v; }
                     else if (k == K_HOVER_OPACITY) { c.HoverOpacity = D(v, c.HoverOpacity); }
                     else if (k == K_HOVER_BORDER) { c.HoverBorderColor = v; }
                     else if (k == K_HOVER_BORDER_W) { c.HoverBorderWidth = D(v, c.HoverBorderWidth); }
                     else if (k == K_TRIGGER) { c.TriggerWidth = D(v, c.TriggerWidth); }
-            else if (k == K_PEEK) { c.PeekWidth = D(v, c.PeekWidth); }
-            else if (k == K_UI_OPACITY) { c.SettingsOpacity = D(v, c.SettingsOpacity); }
-            else if (k == K_UI_REFRACT) { c.UiRefraction = (v == "1" || v.ToLower() == "true"); }
+                    else if (k == K_PEEK) { c.PeekWidth = D(v, c.PeekWidth); }
+                    else if (k == K_UI_OPACITY) { c.SettingsOpacity = D(v, c.SettingsOpacity); }
                     else if (k == K_ANIM) { c.AnimMs = (int)D(v, c.AnimMs); }
                     else if (k == K_COLLAPSE_DELAY) { c.CollapseDelayMs = (int)D(v, c.CollapseDelayMs); }
                     else if (k == K_AUTOSTART) { c.AutoStart = (v == "1" || v.ToLower() == "true"); }
-                    else if (k == K_TOOLTIP) { c.ShowToolTip = (v == "1" || v.ToLower() == "true"); }
+                    else if (k == K_TOOLTIP) { legacyTooltip = (v == "1" || v.ToLower() == "true"); }
                     else if (k == K_ANIM_FPS) { c.AnimFps = (int)D(v, c.AnimFps); }
                     else if (k == K_DRAG) { c.DragReorder = (v == "1" || v.ToLower() == "true"); }
                     else if (k == K_HIDE_DESKTOP_ICONS) { c.HideDesktopIcons = (v == "1" || v.ToLower() == "true"); }
@@ -168,7 +167,7 @@ namespace SideStack
                 Logger.Write("ConfigStore.Load", ex);
             }
 
-            if (!nameModeExplicit) { c.NameMode = c.ShowToolTip ? "hover" : "off"; }
+            if (!nameModeExplicit) { c.NameMode = legacyTooltip ? "hover" : "off"; }
 
             c.Left = left;
             c.Right = right;
@@ -197,10 +196,10 @@ namespace SideStack
                 sb.AppendLine(K_ICON_RADIUS + "=" + N(c.IconRadiusRatio));
                 sb.AppendLine("# panel.style: 面板风格 glass=经典玻璃 / clear=透亮（高透+轮廓高光+边缘色散） / lens=光感（液态玻璃放大镜：折射+色散，背景取面板背后的屏幕）");
                 sb.AppendLine(K_PANEL_STYLE + "=" + c.PanelStyle);
-            sb.AppendLine("# panel.lens.scale: 《光感》玻璃清晰度（内部渲染分辨率 0.5~1.0）。1.0=满分辨率最锐（默认）；调小更省 CPU，但玻璃会明显变柔");
-            sb.AppendLine(K_LENS_SCALE + "=" + c.LensScale.ToString("F2", CultureInfo.InvariantCulture));
-            sb.AppendLine("# easing: 展开/收起的缓动曲线 smooth=平滑（两端都慢，位移全程可见）/ linear=线性 / snap=干脆（旧行为：前 1/5 时间走完一半位移，看着像瞬间弹出）");
-            sb.AppendLine(K_EASING + "=" + c.Easing);
+                sb.AppendLine("# panel.lens.scale: 《光感》玻璃清晰度（内部渲染分辨率 0.5~1.0）。1.0=满分辨率最锐（默认）；调小更省 CPU，但玻璃会明显变柔");
+                sb.AppendLine(K_LENS_SCALE + "=" + c.LensScale.ToString("F2", CultureInfo.InvariantCulture));
+                sb.AppendLine("# easing: 展开/收起的缓动曲线 smooth=平滑（两端都慢，位移全程可见）/ linear=线性 / snap=干脆（旧行为：前 1/5 时间走完一半位移，看着像瞬间弹出）");
+                sb.AppendLine(K_EASING + "=" + c.Easing);
                 sb.AppendLine("# icon.namemode: 名称显示 off=关闭 / hover=悬停 / always=常显");
                 sb.AppendLine(K_NAME_MODE + "=" + c.NameMode);
                 sb.AppendLine();
@@ -212,23 +211,20 @@ namespace SideStack
                 sb.AppendLine();
                 sb.AppendLine("# ===== 行为 =====");
                 sb.AppendLine("# behavior.peekwidth: 收起状态在屏幕边缘露出的宽度（DIP）。0 = 完全收进屏幕、边缘看不到任何东西");
-            sb.AppendLine("#                    露不露出与「能不能唤出」无关 —— 鼠标贴到屏幕边缘（宽度见 triggerwidth）就会滑出。");
-            sb.AppendLine(K_PEEK + "=" + N(c.PeekWidth));
-            sb.AppendLine("# ui.settingsopacity: 设置界面自身的不透明度（0.35~1.0）。只影响窗口玻璃背景的透明程度，");
-            sb.AppendLine("#                    文字与控件始终不透明。1.00 = 几乎完全遮住背后（默认 0.88）。");
-            sb.AppendLine(K_UI_OPACITY + "=" + N(c.SettingsOpacity));
-            sb.AppendLine("# ui.refraction: 设置界面各区域（窗口外壳 + 每张卡片）的边缘折射，1 = 开（默认）/ 0 = 关。");
-            sb.AppendLine("#                开启时会在抓屏的一瞬间把该窗口排除出抓屏（避免自反馈），不影响截图与屏幕显示。");
-            sb.AppendLine(K_UI_REFRACT + "=" + (c.UiRefraction ? "1" : "0"));
-            sb.AppendLine(K_TRIGGER + "=" + N(c.TriggerWidth));
+                sb.AppendLine("#                    露不露出与「能不能唤出」无关 —— 鼠标贴到屏幕边缘（宽度见 triggerwidth）就会滑出。");
+                sb.AppendLine(K_PEEK + "=" + N(c.PeekWidth));
+                sb.AppendLine("# ui.settingsopacity: 设置界面自身的不透明度（0.35~1.0）。只影响窗口玻璃背景的透明程度，");
+                sb.AppendLine("#                    文字与控件始终不透明。1.00 = 几乎完全遮住背后（默认 0.88）。");
+                sb.AppendLine(K_UI_OPACITY + "=" + N(c.SettingsOpacity));
+                sb.AppendLine(K_TRIGGER + "=" + N(c.TriggerWidth));
                 sb.AppendLine(K_ANIM + "=" + c.AnimMs.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine(K_COLLAPSE_DELAY + "=" + c.CollapseDelayMs.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine(K_AUTOSTART + "=" + (c.AutoStart ? "1" : "0"));
-                sb.AppendLine(K_TOOLTIP + "=" + (c.ShowToolTip ? "1" : "0"));
+                // behavior.showtooltip 已废弃：名称提示由 icon.namemode 派生，不再写出；旧文件仍会被读取。
                 sb.AppendLine();
                 sb.AppendLine("# ===== 动画与交互 =====");
                 sb.AppendLine("# animfps: 面板滑入/滑出动画的刷新率（FPS），取值 1 ~ 显示器最高刷新率，超出上限按上限处理；");
-            sb.AppendLine("#          《光感》的实时玻璃背景也按这个帧率刷新（同一个值，不再单独设置）");
+                sb.AppendLine("#          《光感》的实时玻璃背景也按这个帧率刷新（同一个值，不再单独设置）");
                 sb.AppendLine(K_ANIM_FPS + "=" + c.AnimFps.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("# dragreorder: 是否允许在 Dock 栏内拖动图标（1/0）；拖到另一个图标上时仅这两个图标互换位置");
                 sb.AppendLine(K_DRAG + "=" + (c.DragReorder ? "1" : "0"));
@@ -240,10 +236,10 @@ namespace SideStack
                 sb.AppendLine();
                 sb.AppendLine("# ===== 不修改圆角的图标（右键图标 →「不修改圆角」；不受「恢复默认」影响）=====");
                 foreach (string p in c.NoRound) { sb.AppendLine(K_NOROUND + "=" + p); }
-                  sb.AppendLine();
-                  sb.AppendLine("# ===== 单个图标的自定义图片与缩放（右键图标 →「自定义图标…」/「图标缩放」；不受「恢复默认」影响）=====");
-                  foreach (string p in c.CustomIcons) { sb.AppendLine(K_ICON_CUSTOM + "=" + p); }
-                  foreach (string p in c.IconScales) { sb.AppendLine(K_ICON_SCALE + "=" + p); }
+                sb.AppendLine();
+                sb.AppendLine("# ===== 单个图标的自定义图片与缩放（右键图标 →「自定义图标…」/「图标缩放」；不受「恢复默认」影响）=====");
+                foreach (string p in c.CustomIcons) { sb.AppendLine(K_ICON_CUSTOM + "=" + p); }
+                foreach (string p in c.IconScales) { sb.AppendLine(K_ICON_SCALE + "=" + p); }
                 sb.AppendLine();
                 sb.AppendLine("# ===== 图标分组：格式 绝对路径|显示名；left.empty / right.empty 表示该位置是空白位置（可落下图标，使图标之间不必紧挨）=====");
                 foreach (DockItem it in c.Left)
@@ -294,17 +290,31 @@ namespace SideStack
                 if (string.IsNullOrEmpty(FilePath) || !File.Exists(FilePath)) { return; }
 
                 string cur = File.ReadAllText(FilePath);
-                if (cur == lastSavedText) { return; }
                 string dir = Path.GetDirectoryName(FilePath);
                 if (string.IsNullOrEmpty(dir)) { return; }
                 string bakDir = Path.Combine(dir, "backups");
                 Directory.CreateDirectory(bakDir);
 
-                string name = "config-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt";
-                string dst = Path.Combine(bakDir, name);
-                if (!File.Exists(dst)) { File.Copy(FilePath, dst, true); }
-
+                // 与最近一份备份内容相同就不再重复备份：保存会被频繁触发（滑块、拖拽），
+                // 这里只想留下“不同版本”的历史，而不是每秒刷掉十几份。
                 FileInfo[] all = new DirectoryInfo(bakDir).GetFiles("config-*.txt");
+                if (all.Length > 0)
+                {
+                    Array.Sort(all, delegate (FileInfo a, FileInfo b)
+                    {
+                        return b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc);
+                    });
+                    try { if (File.ReadAllText(all[0].FullName) == cur) { return; } }
+                    catch { }
+                }
+
+                // 文件名精确到秒；同一秒内连续改动时加序号，避免后一次备份被吞掉。
+                string stamp = "config-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                string dst = Path.Combine(bakDir, stamp + ".txt");
+                for (int n = 2; File.Exists(dst); n++) { dst = Path.Combine(bakDir, stamp + "-" + n + ".txt"); }
+                File.Copy(FilePath, dst, true);
+
+                all = new DirectoryInfo(bakDir).GetFiles("config-*.txt");
                 if (all.Length > BackupKeep)
                 {
                     Array.Sort(all, delegate (FileInfo a, FileInfo b)
@@ -329,23 +339,31 @@ namespace SideStack
             }
         }
 
-        private static void AddItem(List<DockItem> list, string v, bool empty)
+        // "路径|值" 的统一解析：用最后一个 '|' 分隔，这样路径里即使含有 '|' 也能正确取出值。
+        internal static bool SplitPair(string s, out string path, out string value)
         {
-            if (empty) { list.Add(DockItem.MakeEmpty()); return; }
-            if (string.IsNullOrEmpty(v)) { return; }
-            int bar = v.LastIndexOf('|');
-            string p, n;
+            path = null;
+            value = null;
+            if (string.IsNullOrEmpty(s)) { return false; }
+            int bar = s.LastIndexOf('|');
             if (bar > 0)
             {
-                p = v.Substring(0, bar).Trim();
-                n = v.Substring(bar + 1).Trim();
+                path = s.Substring(0, bar).Trim();
+                value = s.Substring(bar + 1).Trim();
             }
             else
             {
-                p = v.Trim();
-                n = "";
+                path = s.Trim();
+                value = "";
             }
-            if (p.Length == 0) { return; }
+            return path.Length > 0;
+        }
+
+        private static void AddItem(List<DockItem> list, string v, bool empty)
+        {
+            if (empty) { list.Add(DockItem.MakeEmpty()); return; }
+            string p, n;
+            if (!SplitPair(v, out p, out n)) { return; }
             if (n.Length == 0) { n = System.IO.Path.GetFileNameWithoutExtension(p); }
             list.Add(new DockItem(p, n));
         }
@@ -428,8 +446,6 @@ namespace SideStack
             if (c.NoRound == null) { c.NoRound = new List<string>(); }
             if (c.CustomIcons == null) { c.CustomIcons = new List<string>(); }
             if (c.IconScales == null) { c.IconScales = new List<string>(); }
-
-            c.ShowToolTip = (c.NameMode != "off");
         }
 
         public static bool ContainsCI(List<string> list, string v)

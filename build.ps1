@@ -1,4 +1,4 @@
-﻿# SideStack 一键编译脚本
+﻿﻿# SideStack 一键编译脚本
 # 用法（在本目录下打开 PowerShell 执行）：
 #   .\build.ps1                 编译（自动备份 SideStack.exe.bak，不启动）
 #   .\build.ps1 -Restart        编译后结束旧实例并启动新版本
@@ -87,6 +87,8 @@ $cscArgs += '/nologo'
 $cscArgs += '/target:winexe'
 $cscArgs += '/platform:anycpu'
 $cscArgs += '/optimize+'
+# 源码是 UTF-8（无 BOM），固定按 UTF-8 读，避免在非中文系统上中文提示变成乱码。
+$cscArgs += '/codepage:65001'
 $cscArgs += ('/out:"' + $out + '"')
 $cscArgs += '/win32icon:"' + $icon + '"'
 if (Test-Path $manifest) { $cscArgs += '/win32manifest:"' + $manifest + '"' }

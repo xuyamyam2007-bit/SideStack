@@ -401,13 +401,15 @@ namespace SideStack
                 DockConfig d = new DockConfig();
                 if (!Dialog.Confirm(this, "恢复默认设置",
                         "将把以下参数恢复为出厂默认值：\r\n\r\n" +
-                        "  · 名称显示\r\n" +
+                        "  · 面板风格 " + d.PanelStyle + " / 名称显示 " + d.NameMode + "\r\n" +
                         "  · 图标大小 " + d.IconSize + " / 间距 " + d.IconSpacing + " / 内边距 " + d.IconPad +
                         " / 圆角 " + (d.IconRadiusRatio * 100) + "%\r\n" +
                         "  · 悬停底色 " + d.HoverColor + " / 不透明度 " + (d.HoverOpacity * 100) + "% / 描边 " + d.HoverBorderWidth + "px\r\n" +
-                        "  · 触发带宽 " + d.TriggerWidth + " / 动画 " + d.AnimMs + "ms / 收回延迟 " + d.CollapseDelayMs + "ms / 刷新率 " + d.AnimFps + "Hz\r\n" +
+                        "  · 悬停描边色 " + d.HoverBorderColor + " / 动画缓动 " + d.Easing + "\r\n" +
+                        "  · 触发带宽 " + d.TriggerWidth + " / 露边 " + d.PeekWidth + " / 动画 " + d.AnimMs + "ms / 收回延迟 " + d.CollapseDelayMs + "ms / 刷新率 " + d.AnimFps + "Hz\r\n" +
                         "  · 允许拖动图标互换位置\r\n\r\n" +
-                        "开机自启与隐藏桌面图标也不会被改动。\r\n" +
+                        "左侧/右侧的图标、单个图标的自定义图片与缩放、不修改圆角的图标、忽略列表，\r\n" +
+                        "以及开机自启与隐藏桌面图标都不会被改动。\r\n" +
                         "确定要恢复吗？"))
                 {
                     return;

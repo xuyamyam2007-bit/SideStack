@@ -116,6 +116,8 @@ namespace SideStack
             a.Add("/target:winexe");
             a.Add("/platform:anycpu");
             a.Add("/optimize+");
+            // 源码是 UTF-8（无 BOM）：固定按 UTF-8 读，避免在非中文系统上中文提示变成乱码。
+            a.Add("/codepage:65001");
             a.Add("/out:\"" + outExe + "\"");
 
             string ico = Path.Combine(dir, "app.ico");
