@@ -132,27 +132,33 @@ namespace SideStack
             return new int[] { cols, rows };
         }
 
+        // 原地覆盖：所有“换配置”的路径都走这里，保证 App 永远持有同一个实例，
+        // 各个窗口缓存的引用不会变成脱节的旧副本。
+        public void CopyFrom(DockConfig s)
+        {
+            if (s == null || object.ReferenceEquals(s, this)) { return; }
+            IconSize = s.IconSize; IconSpacing = s.IconSpacing; IconPad = s.IconPad;
+            PanelStyle = s.PanelStyle; LensScale = s.LensScale; NameMode = s.NameMode;
+            HoverColor = s.HoverColor; HoverOpacity = s.HoverOpacity;
+            HoverBorderColor = s.HoverBorderColor; HoverBorderWidth = s.HoverBorderWidth;
+            IconRadiusRatio = s.IconRadiusRatio; SettingsOpacity = s.SettingsOpacity;
+            UiRefraction = s.UiRefraction; TriggerWidth = s.TriggerWidth; PeekWidth = s.PeekWidth;
+            AnimMs = s.AnimMs; CollapseDelayMs = s.CollapseDelayMs; AutoStart = s.AutoStart;
+            ShowToolTip = s.ShowToolTip; HideDesktopIcons = s.HideDesktopIcons;
+            AnimFps = s.AnimFps; Easing = s.Easing; DragReorder = s.DragReorder;
+
+            Ignored.Clear(); Ignored.AddRange(s.Ignored);
+            NoRound.Clear(); NoRound.AddRange(s.NoRound);
+            CustomIcons.Clear(); CustomIcons.AddRange(s.CustomIcons);
+            IconScales.Clear(); IconScales.AddRange(s.IconScales);
+            Left.Clear(); foreach (DockItem i in s.Left) { Left.Add(CloneItem(i)); }
+            Right.Clear(); foreach (DockItem i in s.Right) { Right.Add(CloneItem(i)); }
+        }
+
         public DockConfig Clone()
         {
             DockConfig c = new DockConfig();
-            c.IconSize = IconSize; c.IconSpacing = IconSpacing; c.IconPad = IconPad;
-            c.IconRadiusRatio = IconRadiusRatio;
-            c.PanelStyle = PanelStyle; c.NameMode = NameMode;
-            c.HoverColor = HoverColor; c.HoverOpacity = HoverOpacity;
-            c.HoverBorderColor = HoverBorderColor; c.HoverBorderWidth = HoverBorderWidth;
-            c.TriggerWidth = TriggerWidth; c.AnimMs = AnimMs;
-            c.CollapseDelayMs = CollapseDelayMs; c.AutoStart = AutoStart;
-            c.ShowToolTip = ShowToolTip;
-            c.AnimFps = AnimFps; c.Easing = Easing; c.DragReorder = DragReorder;
-            c.HideDesktopIcons = HideDesktopIcons;
-
-            c.LensScale = LensScale; c.PeekWidth = PeekWidth; c.SettingsOpacity = SettingsOpacity; c.UiRefraction = UiRefraction;
-            foreach (string p in Ignored) { c.Ignored.Add(p); }
-            foreach (string p in NoRound) { c.NoRound.Add(p); }
-            foreach (string p in CustomIcons) { c.CustomIcons.Add(p); }
-            foreach (string p in IconScales) { c.IconScales.Add(p); }
-            foreach (DockItem i in Left) { c.Left.Add(CloneItem(i)); }
-            foreach (DockItem i in Right) { c.Right.Add(CloneItem(i)); }
+            c.CopyFrom(this);
             return c;
         }
 

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Globalization;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
@@ -16,6 +17,7 @@ namespace SideStack
     public class DockApp : Application
     {
         private DockConfig cfg;
+        private string iconSig;                 // 上次应用配置时的“图标位图签名”
         private DockWindow left;
         private DockWindow right;
 
@@ -150,6 +152,7 @@ namespace SideStack
 
             bool exists = File.Exists(ConfigStore.FilePath);
             cfg = ConfigStore.Load();
+            iconSig = BuildIconSig(cfg);
             IconLoader.RadiusRatio = cfg.IconRadiusRatio;
             IconLoader.SetNoRound(cfg.NoRound);
             if (!exists)
@@ -534,12 +537,16 @@ namespace SideStack
         {
             try
             {
-                cfg = nc;
+                cfg.CopyFrom(nc);                       // 原地覆盖，不换实例
+                string sig = BuildIconSig(cfg);
+                bool needIconReload = (iconSig != null && !string.Equals(sig, iconSig, StringComparison.Ordinal));
+                iconSig = sig;
+
                 ConfigStore.Save(cfg);
 
                 IconLoader.RadiusRatio = cfg.IconRadiusRatio;
                 IconLoader.SetNoRound(cfg.NoRound);
-                IconLoader.Clear();
+                if (needIconReload) { IconLoader.Clear(); }
                 left.ApplyConfig(cfg);
                 right.ApplyConfig(cfg);
                 ApplyDesktopIconSetting(false);
@@ -547,6 +554,27 @@ namespace SideStack
             }
             catch (Exception ex) { Logger.Write("ApplyNewConfig", ex); }
             RefreshHost();
+        }
+
+        // 影响“图标位图内容”的字段：圆角比例、不圆角集合、自定义图标映射。
+        // 用“上一次的签名”比较，这样无论改动是来自设置窗口直接改 cfg，还是来自副本覆盖，都能正确判断。
+        private static string BuildIconSig(DockConfig c)
+        {
+            if (c == null) { return ""; }
+            StringBuilder sb = new StringBuilder();
+            sb.Append(c.IconRadiusRatio.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)).Append('|');
+            AppendStringSet(sb, c.NoRound);
+            sb.Append('|');
+            AppendStringSet(sb, c.CustomIcons);
+            return sb.ToString();
+        }
+
+        private static void AppendStringSet(StringBuilder sb, List<string> list)
+        {
+            if (list == null) { return; }
+            List<string> copy = new List<string>(list);
+            copy.Sort(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < copy.Count; i++) { sb.Append(copy[i]).Append('~'); }
         }
 
         private void PickCustomIcon(DockItem it)
@@ -679,7 +707,9 @@ namespace SideStack
         {
             try
             {
-                cfg = ConfigStore.Load();
+                DockConfig fresh = ConfigStore.Load();
+                if (fresh != null) { cfg.CopyFrom(fresh); }
+                iconSig = BuildIconSig(cfg);
                 IconLoader.RadiusRatio = cfg.IconRadiusRatio;
                 IconLoader.SetNoRound(cfg.NoRound);
                 IconLoader.Clear();

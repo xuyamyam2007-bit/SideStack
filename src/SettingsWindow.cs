@@ -944,12 +944,12 @@ namespace SideStack
                 syncing = true;
                 try
                 {
-                    DockConfig fresh = ConfigStore.Load();
-                    if (fresh != null) { CopyInto(cfg, fresh); }
+                    // App 会把磁盘内容灌进同一个 cfg 实例（DockConfig.CopyFrom），
+                    // 这里不再自己读盘/拷贝，否则会造出第二份副本。
+                    if (reloadCfg != null) { reloadCfg(); }
                 }
                 finally { syncing = old; }
 
-                if (reloadCfg != null) { reloadCfg(); }
                 RefreshAfterExternalChange();
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.DoReload", ex); }
@@ -961,35 +961,6 @@ namespace SideStack
             syncing = true;
             try { LoadValues(); }
             finally { syncing = old; }
-        }
-
-        private static void CopyInto(DockConfig dst, DockConfig src)
-        {
-            dst.IconSize = src.IconSize;
-            dst.IconSpacing = src.IconSpacing;
-            dst.IconPad = src.IconPad;
-            dst.PanelStyle = src.PanelStyle;
-            dst.NameMode = src.NameMode;
-            dst.HoverColor = src.HoverColor;
-            dst.HoverOpacity = src.HoverOpacity;
-            dst.HoverBorderColor = src.HoverBorderColor;
-            dst.HoverBorderWidth = src.HoverBorderWidth;
-            dst.TriggerWidth = src.TriggerWidth;
-            dst.AnimMs = src.AnimMs;
-            dst.CollapseDelayMs = src.CollapseDelayMs;
-            dst.AutoStart = src.AutoStart;
-            dst.ShowToolTip = src.ShowToolTip;
-            dst.AnimFps = src.AnimFps;
-            dst.DragReorder = src.DragReorder;
-            dst.HideDesktopIcons = src.HideDesktopIcons;
-
-            dst.Ignored.Clear();
-            for (int i = 0; i < src.Ignored.Count; i++) { dst.Ignored.Add(src.Ignored[i]); }
-
-            dst.Left.Clear();
-            for (int i = 0; i < src.Left.Count; i++) { dst.Left.Add(src.Left[i]); }
-            dst.Right.Clear();
-            for (int i = 0; i < src.Right.Count; i++) { dst.Right.Add(src.Right[i]); }
         }
 
         private void DoOpenFolder()
