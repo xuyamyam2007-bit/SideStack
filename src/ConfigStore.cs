@@ -111,7 +111,9 @@ namespace SideStack
 
             try
             {
-                string[] lines = File.ReadAllLines(FilePath, Encoding.UTF8);
+                string all = File.ReadAllText(FilePath, Encoding.UTF8);
+                lastSavedText = all;
+                string[] lines = all.Replace("\r\n", "\n").Split('\n');
                 foreach (string raw in lines)
                 {
                     string line = raw.Trim();
@@ -181,7 +183,6 @@ namespace SideStack
             Current = c;
             try
             {
-                BackupCurrent();
                 Clamp(c);
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("# SideStack 配置文件 —— 可用记事本直接编辑，保存后右键 Dock 面板选择\"重新加载\"");
@@ -254,8 +255,27 @@ namespace SideStack
                     sb.AppendLine((it.IsEmpty ? K_EMPTY_R : K_ITEM_R) + "=" + it.Path + "|" + it.Name);
                 }
 
-                File.WriteAllText(FilePath, sb.ToString(), new UTF8Encoding(false));
-                lastSavedText = sb.ToString();
+                string text = sb.ToString();
+                // 内容没变就什么都不做：右键菜单里大量操作都会走 Save，
+                // 以前每次都重写文件 + 多一份备份（重启后第一次保存尤其明显）。
+                if (string.Equals(text, lastSavedText, StringComparison.Ordinal)) { return; }
+
+                BackupCurrent();
+
+                string tmp = FilePath + ".tmp";
+                File.WriteAllText(tmp, text, new UTF8Encoding(false));
+                if (File.Exists(FilePath))
+                {
+                    try { File.Replace(tmp, FilePath, null, true); }
+                    catch
+                    {
+                        File.Copy(tmp, FilePath, true);
+                        try { File.Delete(tmp); } catch { }
+                    }
+                }
+                else { File.Move(tmp, FilePath); }
+
+                lastSavedText = text;
             }
             catch (Exception ex)
             {

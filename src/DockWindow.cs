@@ -282,7 +282,6 @@ namespace SideStack
                 Logger.Write("DockWindow.OnSourceInitialized", ex2);
             }
 
-            UpdateDpi();
             RebuildItems();
             Relayout();
         }
@@ -528,6 +527,9 @@ namespace SideStack
             }
 
             Theme.StyleMenu(panelMenu);
+
+            // 重建后几何可能变化（图标数、尺寸），统一走延迟入口刷新一次底图。
+            if (cfg != null && IsLensStyle(cfg.PanelStyle)) { RequestLensRefresh(80); }
         }
 
         private void ShowHoverBox(Border box)
@@ -1699,8 +1701,7 @@ namespace SideStack
             }
             if (dpiScale <= 0.1 || dpiScale > 8) { dpiScale = 1.0; }
             shadowPadPx = ToPx(ShadowPad);
-
-            if (cfg != null && IsLensStyle(cfg.PanelStyle)) { UpdateLensBackdrop(true); }
+            // 这里只算 DPI。抓屏重建底图是重活，统一交给 RebuildItems → RequestLensRefresh。
         }
 
         private static void DetachAnimations(DependencyObject root)
@@ -2330,7 +2331,7 @@ namespace SideStack
             RebuildItems();
             Relayout();
 
-            if (IsLensStyle(cfg.PanelStyle)) { UpdateLensBackdrop(true); }
+            if (IsLensStyle(cfg.PanelStyle)) { RequestLensRefresh(80); }
         }
 
         private void CloseIdleMenus()
