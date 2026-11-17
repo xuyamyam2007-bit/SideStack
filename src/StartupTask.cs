@@ -13,8 +13,11 @@ namespace SideStack
         public const string Name = "SideStack";
         private static string FullPath { get { return Folder + Name; } }
 
-        public const int PriorityBoostOn = 5;
-        public const int PriorityBoostOff = 4;
+        // Windows 任务计划 <Priority>：0 最高、10 最低。
+        // 2/3 = ABOVE_NORMAL_PRIORITY_CLASS，4/5/6 = NORMAL_PRIORITY_CLASS，
+        // 7/8 = BELOW_NORMAL，9/10 = IDLE（0=REALTIME，1=HIGH）。
+        public const int PriorityBoostOn = 3;     // ABOVE_NORMAL
+        public const int PriorityBoostOff = 6;    // NORMAL
 
         private static string StateFile
         {
@@ -182,13 +185,29 @@ namespace SideStack
 
             bool v;
             int p = GetPriority();
-            if (p >= PriorityBoostOn) { RememberPriority(true); v = true; }
-            else if (p > 0) { RememberPriority(false); v = false; }
-            else { v = IsProcessBoosted(); }
+            if (p >= 1 && p <= 3) { RememberPriority(true); v = true; }        // HIGH / ABOVE_NORMAL
+            else if (p > 3) { RememberPriority(false); v = false; }            // NORMAL / BELOW / IDLE
+            else { v = IsProcessBoosted(); }                                   // 0 或读不到：按进程现状判断
 
             priorityCacheTick = now;
             priorityCacheValue = v;
             return v;
+        }
+
+        // 旧版本把“已提升”写成 <Priority>5</Priority>，而 5 实际是 NORMAL。
+        // 升级后一次性改成 3，保住用户当初勾选的那一档。
+        public static void MigrateLegacyPriority()
+        {
+            try
+            {
+                if (!Exists()) { return; }
+                if (GetPriority() != 5) { return; }
+                if (SetPriorityBoostIntent(true))
+                {
+                    Logger.Write("启动优先级：旧任务 <Priority>5 -> 3（ABOVE_NORMAL）");
+                }
+            }
+            catch (Exception ex) { Logger.Write("StartupTask.MigrateLegacyPriority", ex); }
         }
 
         private static int priorityCacheTick = -1;
@@ -248,7 +267,8 @@ namespace SideStack
         {
             try
             {
-                if (!string.IsNullOrEmpty(exePath)) { Create(false, exePath); }
+                // 删除就是删除：以前这里会先 Create(false, exePath) 把任务重建一遍，
+                // 结果是「取消开机自启」反而把任务装了回来。
                 int code;
                 string output = Run("schtasks.exe", new string[] { "/Delete", "/TN", FullPath, "/F" }, out code, 30000);
                 Logger.Write("删除计划任务 -> 退出码 " + code + (code == 0 ? "" : "：" + output));

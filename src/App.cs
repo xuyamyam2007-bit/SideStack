@@ -147,6 +147,7 @@ namespace SideStack
             ShellUtils.MigrateLegacyAutoStart(exePath);
 
             if (StartupTask.IsPriorityBoostWanted()) { StartupTask.BoostProcess(); }
+            StartupTask.MigrateLegacyPriority();
 
             ConfigStore.FilePath = Path.Combine(dir, "config.txt");
 
