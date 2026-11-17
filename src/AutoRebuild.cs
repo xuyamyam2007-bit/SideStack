@@ -17,6 +17,12 @@ namespace SideStack
 
         public static bool TryUpdateBeforeStart()
         {
+            // 发布版可以彻底关掉自检重编译：设置 SIDESTACK_NO_AUTOREBUILD=1。
+            if (string.Equals(Environment.GetEnvironmentVariable("SIDESTACK_NO_AUTOREBUILD"), "1", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             string exePath;
             string dir;
             try
@@ -207,9 +213,10 @@ namespace SideStack
             sb.AppendLine("  ping -n 2 127.0.0.1 >nul");
             sb.AppendLine("  goto waitdie");
             sb.AppendLine(")");
-            sb.AppendLine("taskkill /F /IM \"SideStack.exe\" >nul 2>&1");
-            sb.AppendLine("ping -n 3 127.0.0.1 >nul");
-            sb.AppendLine("move /Y \"" + tempExe + "\" \"" + exePath + "\" >nul 2>&1");
+            // 只结束“镜像名确实是 SideStack.exe”的进程，并按 PID 逐个 kill：
+            // 以前直接用 taskkill /IM，会杀掉机器上任何同名进程（含用户自己的其他副本）。
+            sb.AppendLine("for /f \"tokens=2 delims=,\" %%p in ('tasklist /FI \"IMAGENAME eq SideStack.exe\" /FO CSV /NH') do taskkill /F /PID %%~p >nul 2>&1");
+            sb.AppendLine("ping -n 3 127.0.0.1 >nul");            sb.AppendLine("move /Y \"" + tempExe + "\" \"" + exePath + "\" >nul 2>&1");
             sb.AppendLine("if errorlevel 1 goto fail");
             sb.AppendLine("start \"\" \"" + exePath + "\"");
             sb.AppendLine("goto done");
@@ -219,7 +226,10 @@ namespace SideStack
             sb.AppendLine(":done");
             sb.AppendLine("del \"%~f0\" >nul 2>&1");
 
-            File.WriteAllText(script, sb.ToString(), Encoding.Default);
+            // cmd.exe 用的是 OEM 代码页（中文系统上通常是 936），
+            // 用 Encoding.Default（UTF-8/ANSI）写出来的脚本在中文路径下会乱码，导致 move 失败。
+            Encoding enc = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
+            File.WriteAllText(script, sb.ToString(), enc);
 
             ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"");
             psi.UseShellExecute = false;
