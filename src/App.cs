@@ -1022,11 +1022,10 @@ namespace SideStack
                         {
                             try
                             {
-                                ScreenUtils.InvalidateMonitorCache();
-                                if (left != null) { left.Relayout(); }
-                                if (right != null) { right.Relayout(); }
+                                if (left != null) { left.NotifyScreenChanged("系统显示设置变化"); }
+                                if (right != null) { right.NotifyScreenChanged("系统显示设置变化"); }
                             }
-                            catch (Exception ex2) { Logger.Write("DisplaySettings.Relayout", ex2); }
+                            catch (Exception ex2) { Logger.Write("DisplaySettings.Refresh", ex2); }
                         }));
                     }
                     catch { }
@@ -1046,10 +1045,10 @@ namespace SideStack
                         {
                             try
                             {
-                                if (left != null) { left.Relayout(); }
-                                if (right != null) { right.Relayout(); }
+                                if (left != null) { left.NotifyScreenChanged("系统外观设置变化"); }
+                                if (right != null) { right.NotifyScreenChanged("系统外观设置变化"); }
                             }
-                            catch (Exception ex2) { Logger.Write("UserPreferenceChanged.Relayout", ex2); }
+                            catch (Exception ex2) { Logger.Write("UserPreferenceChanged.Refresh", ex2); }
                         }));
                     }
                     catch { }

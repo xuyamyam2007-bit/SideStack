@@ -76,6 +76,9 @@ namespace SideStack
         // Hide()/Show() 后必须强制重放位置：peekwidth=0 时挂起位置与收起位置重合。
         private bool forcePlacePending;
 
+        private RECT lastMonRect;
+        private RECT lastWorkRect;
+
         private int shadowPadPx = 16;
 
         private ContextMenu panelMenu;
@@ -269,6 +272,9 @@ namespace SideStack
                 v &= ~(long)NativeMethods.WS_EX_APPWINDOW;
                 NativeMethods.SetWindowLongPtr(h, NativeMethods.GWL_EXSTYLE, new IntPtr(v));
                 UpdateDpi();
+
+                HwndSource src = HwndSource.FromHwnd(h);
+                if (src != null) { src.AddHook(OnHwndMessage); }
             }
             catch (Exception ex2)
             {
@@ -285,8 +291,107 @@ namespace SideStack
             base.OnDpiChanged(oldDpi, newDpi);
             UpdateDpi();
             InvalidateWindowOffset();
+            IconLoader.Clear();
             RebuildItems();
             Relayout();
+            forcePlacePending = true;
+            ApplyPosition();
+        }
+
+        private IntPtr OnHwndMessage(IntPtr hwndMsg, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            try
+            {
+                if (msg == NativeMethods.WM_DISPLAYCHANGE)
+                {
+                    RequestScreenRefresh("显示模式变化");
+                }
+                else if (msg == (int)NativeMethods.WM_SETTINGCHANGE && lParam != IntPtr.Zero)
+                {
+                    string area = System.Runtime.InteropServices.Marshal.PtrToStringUni(lParam);
+                    if (string.Equals(area, "WorkArea", StringComparison.OrdinalIgnoreCase))
+                    {
+                        RequestScreenRefresh("工作区变化");
+                    }
+                }
+            }
+            catch { }
+            return IntPtr.Zero;
+        }
+
+        private DispatcherTimer screenTimer;
+        private int screenRefreshLeft;
+
+        public void NotifyScreenChanged(string why)
+        {
+            RequestScreenRefresh(why);
+        }
+
+        private void RequestScreenRefresh(string why)
+        {
+            try
+            {
+                Logger.Write("屏幕参数变化（" + (IsLeft ? "左" : "右") + "面板）：" + why);
+
+                if (screenTimer != null) { screenTimer.Stop(); }
+                else
+                {
+                    screenTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
+                    screenTimer.Tick += delegate
+                    {
+                        screenTimer.Stop();
+                        ApplyScreenRefresh();
+                    };
+                }
+                screenRefreshLeft = 3;
+                screenTimer.Interval = TimeSpan.FromMilliseconds(120);
+                screenTimer.Start();
+            }
+            catch (Exception ex) { Logger.Write("RequestScreenRefresh", ex); }
+        }
+
+        private void ApplyScreenRefresh()
+        {
+            try
+            {
+                double oldDpi = dpiScale;
+                RECT oldMon = lastMonRect;
+
+                ScreenUtils.InvalidateMonitorCache();
+                UpdateDpi();
+
+                RECT mon = ScreenUtils.GetPrimaryMonitorPx();
+                bool dpiChanged = Math.Abs(dpiScale - oldDpi) > 0.001;
+                bool screenChanged = !RectEq(mon, oldMon);
+
+                if (dpiChanged || screenChanged)
+                {
+                    CloseAllMenus();
+                    IconLoader.Clear();
+                    RebuildItems();
+                    Logger.Write("屏幕参数已生效（" + (IsLeft ? "左" : "右") + "面板）：DPI " + oldDpi.ToString("0.##")
+                                 + " -> " + dpiScale.ToString("0.##") + "，可见区域 " + mon.Width + "×" + mon.Height
+                                 + "，已按新像素尺寸重建图标");
+                }
+
+                InvalidateWindowOffset();
+                Relayout();
+                forcePlacePending = true;
+                ApplyPosition();
+
+                screenRefreshLeft--;
+                if (screenRefreshLeft > 0 && screenTimer != null)
+                {
+                    screenTimer.Interval = TimeSpan.FromMilliseconds(screenRefreshLeft == 2 ? 350 : 900);
+                    screenTimer.Start();
+                }
+            }
+            catch (Exception ex) { Logger.Write("ApplyScreenRefresh", ex); }
+        }
+
+        private static bool RectEq(RECT a, RECT b)
+        {
+            return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
         }
 
         private void BuildPanel()
@@ -1799,6 +1904,15 @@ namespace SideStack
         {
             RECT mon = ScreenUtils.GetPrimaryMonitorPx();
             RECT work = ScreenUtils.GetPrimaryWorkPx();
+
+            // 显示器/工作区矩形一旦变化，即使算出来的窗口坐标恰好相同也必须重放一次：
+            // 分辨率切换时右侧面板的左沿会变，左侧面板只是高度变，靠"坐标是否变化"判断会漏掉后者。
+            if (!RectEq(mon, lastMonRect) || !RectEq(work, lastWorkRect))
+            {
+                lastMonRect = mon;
+                lastWorkRect = work;
+                forcePlacePending = true;
+            }
 
             int monL = mon.Left, monR = mon.Right;
             int workT = work.Top, workB = work.Bottom;

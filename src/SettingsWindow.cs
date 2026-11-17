@@ -423,7 +423,7 @@ namespace SideStack
                 {
                     if (cbDrag != null) { cbDrag.SetCheckedSilently(cfg.DragReorder); }
                     if (cbPinned != null) { cbPinned.SetCheckedSilently((getPinned != null) && getPinned()); }
-                    if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
+                    if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ReadAutoStartState()); }
                     if (cbHideIcons != null) { cbHideIcons.SetCheckedSilently(cfg.HideDesktopIcons); }
                     if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
 
@@ -784,10 +784,11 @@ namespace SideStack
             {
                 if (cfg.AnimFps > maxFps) { cfg.AnimFps = maxFps; }
 
-                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
+                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ReadAutoStartState()); }
                 if (cbDrag != null) { cbDrag.SetCheckedSilently(cfg.DragReorder); }
                 if (cbHideIcons != null) { cbHideIcons.SetCheckedSilently(cfg.HideDesktopIcons); }
                 if (cbPinned != null) { cbPinned.SetCheckedSilently((getPinned != null) && getPinned()); }
+                if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.LoadValues", ex); }
             finally { syncing = old; }
@@ -838,14 +839,8 @@ namespace SideStack
 
                 Change(delegate { cfg.AutoStart = want; });
 
-                if (cbAutoStart != null)
-                {
-                    cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists());
-                }
-                if (cbStartupPriority != null)
-                {
-                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted());
-                }
+                RefreshStartupToggles();
+                RefreshStartupTogglesSoon();
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyAutoStart", ex); }
         }
@@ -863,26 +858,64 @@ namespace SideStack
                     if (!StartupTask.Create(want, exePath))
                     {
                         Logger.Write("启动优先级：创建计划任务失败，保持原自启方式不变");
-                        if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
-                        return;
+                        StartupTask.RememberPriority(want);
                     }
-                    ShellUtils.SetAutoStart(false, exePath);
-                    Change(delegate { cfg.AutoStart = true; });
+                    else
+                    {
+                        ShellUtils.SetAutoStart(false, exePath);
+                        Change(delegate { cfg.AutoStart = true; });
+                    }
                 }
                 else
                 {
                     StartupTask.SetPriorityBoostIntent(want);
                 }
 
-                if (want) { StartupTask.BoostProcess(); }
+                StartupTask.SetProcessPriority(want);
+                Logger.Write("启动优先级：已读取当前状态 = " + StartupTask.IsPriorityBoostWanted()
+                             + "（进程优先级 " + ProcessPriorityText() + "）");
 
-                if (cbStartupPriority != null)
-                {
-                    cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted());
-                }
-                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ShellUtils.IsAutoStartOn() || StartupTask.Exists()); }
+                RefreshStartupToggles();
+                RefreshStartupTogglesSoon();
             }
             catch (Exception ex) { Logger.Write("SettingsWindow.ApplyStartupPriority", ex); }
+        }
+
+        private static string ProcessPriorityText()
+        {
+            try { return System.Diagnostics.Process.GetCurrentProcess().PriorityClass.ToString(); }
+            catch { return "未知"; }
+        }
+
+        private bool ReadAutoStartState()
+        {
+            return ShellUtils.IsAutoStartOn() || StartupTask.Exists();
+        }
+
+        private void RefreshStartupToggles()
+        {
+            try
+            {
+                if (cbAutoStart != null) { cbAutoStart.SetCheckedSilently(ReadAutoStartState()); }
+                if (cbStartupPriority != null) { cbStartupPriority.SetCheckedSilently(StartupTask.IsPriorityBoostWanted()); }
+            }
+            catch (Exception ex) { Logger.Write("SettingsWindow.RefreshStartupToggles", ex); }
+        }
+
+        private void RefreshStartupTogglesSoon()
+        {
+            try
+            {
+                System.Windows.Threading.DispatcherTimer t = new System.Windows.Threading.DispatcherTimer();
+                t.Interval = TimeSpan.FromMilliseconds(400);
+                t.Tick += delegate
+                {
+                    t.Stop();
+                    RefreshStartupToggles();
+                };
+                t.Start();
+            }
+            catch { }
         }
 
         private void OpenAppList()

@@ -16,21 +16,88 @@ namespace SideStack
         public const int PriorityBoostOn = 5;
         public const int PriorityBoostOff = 4;
 
-        public static bool BoostProcess()
+        private static string StateFile
+        {
+            get
+            {
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SideStack");
+                try { Directory.CreateDirectory(dir); } catch { }
+                return Path.Combine(dir, "startup-state.txt");
+            }
+        }
+
+        private static bool? recordedTask;
+        private static bool? recordedPriority;
+
+        private static void LoadRecorded()
+        {
+            if (recordedTask.HasValue && recordedPriority.HasValue) { return; }
+            try
+            {
+                string f = StateFile;
+                if (!File.Exists(f)) { return; }
+                foreach (string line in File.ReadAllLines(f))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) { continue; }
+                    string k = line.Substring(0, eq).Trim().ToLowerInvariant();
+                    string v = line.Substring(eq + 1).Trim();
+                    if (k == "task") { recordedTask = (v == "1"); }
+                    else if (k == "priority") { recordedPriority = (v == "1"); }
+                }
+            }
+            catch (Exception ex) { Logger.Write("StartupTask.LoadRecorded", ex); }
+        }
+
+        private static void SaveRecorded()
+        {
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                if (recordedTask.HasValue) { sb.AppendLine("task=" + (recordedTask.Value ? "1" : "0")); }
+                if (recordedPriority.HasValue) { sb.AppendLine("priority=" + (recordedPriority.Value ? "1" : "0")); }
+                File.WriteAllText(StateFile, sb.ToString(), new UTF8Encoding(false));
+            }
+            catch (Exception ex) { Logger.Write("StartupTask.SaveRecorded", ex); }
+        }
+
+        public static void RememberTask(bool on)
+        {
+            LoadRecorded();
+            if (recordedTask.HasValue && recordedTask.Value == on) { return; }
+            recordedTask = on;
+            SaveRecorded();
+        }
+
+        public static void RememberPriority(bool on)
+        {
+            LoadRecorded();
+            InvalidatePriorityCache();
+            if (recordedPriority.HasValue && recordedPriority.Value == on) { return; }
+            recordedPriority = on;
+            SaveRecorded();
+        }
+
+        public static bool SetProcessPriority(bool high)
         {
             try
             {
                 System.Diagnostics.Process p = System.Diagnostics.Process.GetCurrentProcess();
-                if (p.PriorityClass == System.Diagnostics.ProcessPriorityClass.AboveNormal
-                    || p.PriorityClass == System.Diagnostics.ProcessPriorityClass.High)
-                {
-                    return true;
-                }
-                p.PriorityClass = System.Diagnostics.ProcessPriorityClass.AboveNormal;
+                System.Diagnostics.ProcessPriorityClass want = high
+                    ? System.Diagnostics.ProcessPriorityClass.AboveNormal
+                    : System.Diagnostics.ProcessPriorityClass.Normal;
+                if (p.PriorityClass == want) { return true; }
+                p.PriorityClass = want;
                 Logger.Write("进程优先级 -> " + p.PriorityClass + "（BasePriority " + p.BasePriority + "）");
                 return true;
             }
-            catch (Exception ex) { Logger.Write("StartupTask.BoostProcess", ex); return false; }
+            catch (Exception ex) { Logger.Write("StartupTask.SetProcessPriority", ex); return false; }
+        }
+
+        public static bool BoostProcess()
+        {
+            return SetProcessPriority(true);
         }
 
         public static bool IsProcessBoosted()
@@ -45,15 +112,46 @@ namespace SideStack
             catch { return false; }
         }
 
+        private static int existsCacheTick = -1;
+        private static bool existsCacheValue;
+
+        private static void InvalidateExistsCache()
+        {
+            existsCacheTick = -1;
+        }
+
         public static bool Exists()
         {
+            int now = Environment.TickCount;
+            if (existsCacheTick >= 0 && unchecked(now - existsCacheTick) >= 0 && unchecked(now - existsCacheTick) < 2000)
+            {
+                return existsCacheValue;
+            }
+
+            bool result;
             try
             {
                 int code;
-                Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath }, out code, 8000);
-                return code == 0;
+                string output = Run("schtasks.exe", new string[] { "/Query", "/TN", FullPath }, out code, 8000);
+                if (code == 0) { RememberTask(true); result = true; }
+                else if (code == 1) { RememberTask(false); result = false; }
+                else
+                {
+                    Logger.Write("查询计划任务失败（退出码 " + code + "）：" + (output ?? "").Trim());
+                    LoadRecorded();
+                    result = recordedTask.HasValue && recordedTask.Value;
+                }
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                Logger.Write("StartupTask.Exists", ex);
+                LoadRecorded();
+                result = recordedTask.HasValue && recordedTask.Value;
+            }
+
+            existsCacheTick = now;
+            existsCacheValue = result;
+            return result;
         }
 
         public static int GetPriority()
@@ -73,13 +171,37 @@ namespace SideStack
 
         public static bool IsPriorityBoostWanted()
         {
+            LoadRecorded();
+            if (recordedPriority.HasValue) { return recordedPriority.Value; }
+
+            int now = Environment.TickCount;
+            if (priorityCacheTick >= 0 && unchecked(now - priorityCacheTick) >= 0 && unchecked(now - priorityCacheTick) < 2000)
+            {
+                return priorityCacheValue;
+            }
+
+            bool v;
             int p = GetPriority();
-            if (p >= PriorityBoostOn) { return true; }
-            return IsProcessBoosted();
+            if (p >= PriorityBoostOn) { RememberPriority(true); v = true; }
+            else if (p > 0) { RememberPriority(false); v = false; }
+            else { v = IsProcessBoosted(); }
+
+            priorityCacheTick = now;
+            priorityCacheValue = v;
+            return v;
+        }
+
+        private static int priorityCacheTick = -1;
+        private static bool priorityCacheValue;
+
+        private static void InvalidatePriorityCache()
+        {
+            priorityCacheTick = -1;
         }
 
         public static bool SetPriorityBoostIntent(bool on)
         {
+            RememberPriority(on);
             try
             {
                 string xml;
@@ -95,7 +217,7 @@ namespace SideStack
                     patched = Regex.Replace(xml, @"(<Settings[^>]*>)", "$1<Priority>" + want + "</Priority>", RegexOptions.None);
                     if (patched == xml)
                     {
-                        Logger.Write("启动优先级：任务 XML 里找不到 <Settings>，无法写入");
+                        Logger.Write("启动优先级：任务 XML 里找不到 <Settings>，只记录意图");
                         return false;
                     }
                 }
@@ -110,6 +232,7 @@ namespace SideStack
 
                 Logger.Write("启动优先级意图 -> " + (on ? "要提升" : "不提升") + "（schtasks 退出码 " + code + "）"
                              + (code == 0 ? "" : "：" + output));
+                InvalidateExistsCache();
                 return code == 0;
             }
             catch (Exception ex) { Logger.Write("StartupTask.SetPriorityBoostIntent", ex); return false; }
@@ -129,6 +252,8 @@ namespace SideStack
                 int code;
                 string output = Run("schtasks.exe", new string[] { "/Delete", "/TN", FullPath, "/F" }, out code, 30000);
                 Logger.Write("删除计划任务 -> 退出码 " + code + (code == 0 ? "" : "：" + output));
+                InvalidateExistsCache();
+                if (code == 0) { RememberTask(false); }
                 return code == 0;
             }
             catch (Exception ex) { Logger.Write("StartupTask.Delete", ex); return false; }
@@ -163,6 +288,12 @@ namespace SideStack
 
                 Logger.Write("创建计划任务（优先级 " + prio + "）-> 退出码 " + code
                              + (code == 0 ? "" : "：" + output));
+                InvalidateExistsCache();
+                if (code == 0)
+                {
+                    RememberTask(true);
+                    RememberPriority(raised);
+                }
                 return code == 0;
             }
             catch (Exception ex) { Logger.Write("StartupTask.Create", ex); return false; }
@@ -246,14 +377,41 @@ namespace SideStack
 
             using (Process p = Process.Start(psi))
             {
-                string so = p.StandardOutput.ReadToEnd();
+                byte[] rawOut = ReadAll(p.StandardOutput.BaseStream);
                 string se = p.StandardError.ReadToEnd();
-                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } exitCode = -1; return so + se; }
+                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } exitCode = -1; return DecodeText(rawOut) + se; }
                 exitCode = p.ExitCode;
-                sb.Append(so);
+                sb.Append(DecodeText(rawOut));
                 if (!string.IsNullOrEmpty(se)) { sb.Append(se); }
             }
             return sb.ToString();
+        }
+
+        private static byte[] ReadAll(Stream s)
+        {
+            using (MemoryStream ms = new MemoryStream())
+            {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = s.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); }
+                return ms.ToArray();
+            }
+        }
+
+        private static string DecodeText(byte[] b)
+        {
+            if (b == null || b.Length == 0) { return ""; }
+            string s;
+            if (b.Length >= 2 && b[0] == 0xFF && b[1] == 0xFE) { s = Encoding.Unicode.GetString(b, 2, b.Length - 2); }
+            else if (b.Length >= 2 && b[0] == 0xFE && b[1] == 0xFF) { s = Encoding.BigEndianUnicode.GetString(b, 2, b.Length - 2); }
+            else if (b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) { s = Encoding.UTF8.GetString(b, 3, b.Length - 3); }
+            else
+            {
+                int zeros = 0;
+                for (int i = 0; i < b.Length; i++) { if (b[i] == 0) { zeros++; } }
+                s = (zeros > b.Length / 8) ? Encoding.Unicode.GetString(b) : Encoding.UTF8.GetString(b);
+            }
+            return s.Replace("\0", "");
         }
 
         private static string Quote(string s)

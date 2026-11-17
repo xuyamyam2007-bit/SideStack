@@ -71,9 +71,13 @@ namespace SideStack
         private static readonly Dictionary<string, Entry> Cache =
             new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 
+        private static readonly Dictionary<string, ImageSource> CustomCache =
+            new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+
         public static void Clear()
         {
             Cache.Clear();
+            CustomCache.Clear();
         }
 
         private static ImageSource appIcon;
@@ -105,6 +109,9 @@ namespace SideStack
         public static ImageSource GetImage(string path, int decodeWidth)
         {
             if (string.IsNullOrEmpty(path)) { return null; }
+            string key = path + "|" + decodeWidth;
+            ImageSource cached;
+            if (CustomCache.TryGetValue(key, out cached)) { return cached; }
             try
             {
                 if (!System.IO.File.Exists(path)) { return null; }
@@ -116,6 +123,7 @@ namespace SideStack
                 bi.UriSource = new Uri(path, UriKind.Absolute);
                 bi.EndInit();
                 bi.Freeze();
+                CustomCache[key] = bi;
                 return bi;
             }
             catch (Exception ex) { Logger.Write("IconLoader.GetImage", ex); return null; }
