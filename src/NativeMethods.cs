@@ -212,6 +212,8 @@ namespace SideStack
 
         public const uint WM_SETTINGCHANGE = 0x001A;
         public const int WM_DISPLAYCHANGE = 0x007E;
+        public const int WM_NCHITTEST = 0x0084;
+        public const int HTTRANSPARENT = -1;
         public const uint SMTO_ABORTIFHUNG = 0x0002;
 
         public const uint SPI_GETWORKAREA = 0x0030;

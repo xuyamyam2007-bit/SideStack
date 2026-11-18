@@ -309,6 +309,17 @@ namespace SideStack
                 {
                     RequestScreenRefresh("显示模式变化");
                 }
+                else if (msg == NativeMethods.WM_NCHITTEST)
+                {
+                    // 面板收着时一律让点击穿过去（收起位在屏幕外，或只露出 peekwidth 那么一条细边）。
+                    // 细边上可能正停着图标槽位的边缘，全屏游戏里点屏幕边缘、或点那条看不见的边，
+                    // 就会“点中”面板里的图标把程序拉起来 —— 看不见的东西不该吃点击。
+                    if (!wantShow && animT <= 0.002)
+                    {
+                        handled = true;
+                        return new IntPtr(NativeMethods.HTTRANSPARENT);
+                    }
+                }
                 else if (msg == (int)NativeMethods.WM_SETTINGCHANGE && lParam != IntPtr.Zero)
                 {
                     string area = System.Runtime.InteropServices.Marshal.PtrToStringUni(lParam);
