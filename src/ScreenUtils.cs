@@ -74,11 +74,15 @@ namespace SideStack
         }
 
         // Covered 只影响收起细条与自动收起；只有 Fullscreen 才允许隐藏面板窗口。
+        // WindowCount 是「当前虚拟桌面、主屏上还没最小化的普通窗口数」：为 0 才允许悬停唤出面板。
         public struct DesktopState
         {
             public bool Covered;
             public bool Fullscreen;
+            public int WindowCount;
             public string Reason;
+
+            public bool DesktopEmpty { get { return WindowCount <= 0; } }
         }
 
         private static string QunsText(int qs)
@@ -99,11 +103,63 @@ namespace SideStack
         private static bool d3dStaleReported;
         private static bool qunsShellLogged;
 
+        // 统计「当前虚拟桌面、主屏上、还没最小化」的普通窗口数。
+        // 只用来决定要不要响应鼠标悬停唤出面板：桌面上一有窗口就不主动弹，避免游戏里转视角把面板扫出来。
+        // 最小化的窗口不算（这正是用户要的语义）；副屏上的窗口也不算，面板只贴主屏两条边。
+        public static int CountDesktopWindows()
+        {
+            RECT pmon = GetPrimaryMonitorPx();
+            int count = 0;
+            try
+            {
+                NativeMethods.EnumWindows(delegate (IntPtr h, IntPtr p)
+                {
+                    try
+                    {
+                        if (h == NativeMethods.GetShellWindow()) { return true; }
+                        if (!NativeMethods.IsWindowVisible(h)) { return true; }
+                        if (NativeMethods.IsIconic(h)) { return true; }   // 最小化不算窗口
+
+                        string cls = ClassNameOf(h);
+                        if (IsExcludedClass(cls)) { return true; }
+
+                        uint pid;
+                        NativeMethods.GetWindowThreadProcessId(h, out pid);
+                        if (pid == OwnPid) { return true; }
+
+                        // 托盘气泡、输入法候选、悬浮工具条这类 ToolWindow 不占桌面。
+                        long ex = NativeMethods.GetWindowLongPtr(h, NativeMethods.GWL_EXSTYLE).ToInt64();
+                        if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) { return true; }
+
+                        // DWM 隐藏的窗口：另一个虚拟桌面上的、已挂起的 UWP、切换虚拟桌面时的残留。
+                        int cloaked;
+                        if (NativeMethods.DwmGetWindowAttribute(h, NativeMethods.DWMWA_CLOAKED, out cloaked, 4) == 0
+                            && cloaked != 0)
+                        {
+                            return true;
+                        }
+
+                        RECT r;
+                        if (!NativeMethods.GetWindowRect(h, out r)) { return true; }
+                        if (r.Width < 8 || r.Height < 8) { return true; }
+                        if (!Intersects(r, pmon)) { return true; }
+
+                        count++;
+                    }
+                    catch { }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch (Exception ex) { Logger.Write("CountDesktopWindows", ex); }
+            return count;
+        }
+
         // 判定顺序：前台有效性筛查 → QUNS（独占全屏直判）→ 几何 → 工作区，不要调换。
         public static DesktopState QueryDesktop()
         {
             DesktopState st = new DesktopState();
             st.Reason = "";
+            st.WindowCount = CountDesktopWindows();
 
             IntPtr h = NativeMethods.GetForegroundWindow();
             string cls = "";

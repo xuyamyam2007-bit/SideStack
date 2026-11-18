@@ -2060,7 +2060,8 @@ namespace SideStack
         }
 
         // covered 不再阻止唤出，只决定细条与自动收起。
-        public void UpdateState(bool covered, bool inTrigger, bool inDock, long nowMs)
+        // hoverAllowed = 「桌面是空的」：只有这时才认边缘悬停，桌面上有窗口时一律不主动弹出。
+        public void UpdateState(bool covered, bool inTrigger, bool inDock, bool hoverAllowed, long nowMs)
         {
             if (ItemCount == 0)
             {
@@ -2079,7 +2080,13 @@ namespace SideStack
                 wantShow = true;
                 lastInsideMs = nowMs;
             }
-            else if (inTrigger || inDock)
+            else if (inDock)
+            {
+                // 已经展开了就保持，别让「桌面上刚出现一个窗口」把面板抽走。
+                wantShow = true;
+                lastInsideMs = nowMs;
+            }
+            else if (inTrigger && hoverAllowed)
             {
                 wantShow = true;
                 lastInsideMs = nowMs;

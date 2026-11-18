@@ -111,6 +111,11 @@ namespace SideStack
         [DllImport("user32.dll")]
         public static extern bool IsWindowVisible(IntPtr hWnd);
 
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd);
 

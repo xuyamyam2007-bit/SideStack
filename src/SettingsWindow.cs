@@ -333,6 +333,10 @@ namespace SideStack
                 delegate { return cfg.TriggerWidth; },
                 delegate (double v) { cfg.TriggerWidth = v; }));
 
+            // 悬停唤出只在空桌面生效，这里必须说清楚，否则用户会以为面板坏了。
+            sp.Children.Add(Hint("鼠标贴边只在这个范围内唤起面板，而且只在主屏桌面上没有任何未最小化的窗口时才生效；" +
+                                 "有窗口时（比如游戏里转视角）不会弹出，需要面板请用托盘图标的「显示面板」。"));
+
             sp.Children.Add(NumField("贴边露出", "px", 0, 16, 0,
                 delegate { return cfg.PeekWidth; },
                 delegate (double v) { cfg.PeekWidth = v; }));

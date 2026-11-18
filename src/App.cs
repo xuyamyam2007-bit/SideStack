@@ -30,6 +30,7 @@ namespace SideStack
         private bool desktopCovered;
         private bool fullscreenApp;
         private bool dockSuspended;
+        private int desktopWindowCount;   // 当前虚拟桌面主屏上未最小化的窗口数；0 才允许悬停唤出
         private bool quitting;
 
         private const int ClearConfirmTicks = 2;
@@ -847,6 +848,16 @@ namespace SideStack
                     lastCoverCheck = now;
                     ScreenUtils.DesktopState st = ScreenUtils.QueryDesktop();
 
+                    // 桌面上有没有窗口：只影响「悬停唤出」，不影响已展开的面板，也不影响托盘里的常显开关。
+                    if (st.WindowCount != desktopWindowCount)
+                    {
+                        desktopWindowCount = st.WindowCount;
+                        Logger.Write("桌面窗口数 -> " + desktopWindowCount +
+                                     (desktopWindowCount > 0
+                                          ? "（有窗口：悬停不再唤出面板，需要时用托盘的「显示面板」）"
+                                          : "（桌面已清空：恢复悬停唤出）"));
+                    }
+
                     bool changed = (st.Covered != desktopCovered) || (st.Fullscreen != fullscreenApp);
                     if (changed)
                     {
@@ -982,6 +993,10 @@ namespace SideStack
                     if (right != null) { right.Resume(); }
                 }
                 Logger.Write("用户手动重新检测桌面状态：挂起标记已清空，面板已恢复");
+
+                // 桌面上有窗口时悬停不再唤出面板；这一项既然叫「唤出」，就把面板钉成常显，
+                // 让用户在任意窗口前面都能把面板拿到手（再用托盘「隐藏面板」解除）。
+                if (desktopWindowCount > 0 && !panelPinned) { TogglePanelPin(); }
             }
             catch (Exception ex) { Logger.Write("ForceRecheckDesktop", ex); }
         }
@@ -994,7 +1009,9 @@ namespace SideStack
             bool inTrigger = IsCursorInBand(d.IsLeft, cfg.TriggerWidth, sc, cur);
             bool inDock = d.ContainsCursorDip(cur.X / sc, cur.Y / sc);
 
-            d.UpdateState(desktopCovered, inTrigger, inDock, now);
+            // 悬停只在这种时候生效：桌面（主屏、当前虚拟桌面）上一个未最小化的窗口都没有。
+            // 游戏里转视角、把光标顶到屏幕边缘的情况因此不会再扫出面板。
+            d.UpdateState(desktopCovered, inTrigger, inDock, desktopWindowCount <= 0, now);
         }
 
         private static bool IsCursorInBand(bool isLeft, double triggerDip, double scale, POINT cur)
